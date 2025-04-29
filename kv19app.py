@@ -59,7 +59,7 @@ with cols_bot[2]:
 
 st.subheader(f"✅ 選択中の風向き：{st.session_state.selected_wind}")
 
-wind_speed = st.number_input("風速(m/s)", min_value=0.0, max_value=10.0, step=0.1, value=3.0)
+wind_speed = st.number_input("風速(m/s)", min_value=0.0, max_value=20.0, step=0.1, value=3.0)
 straight_length = st.number_input("みなし直線(m)", min_value=30, max_value=80, step=1, value=52)
 bank_angle = st.number_input("バンク角(°)", min_value=20.0, max_value=45.0, step=0.1, value=30.0)
 rain = st.checkbox("雨（滑走・慎重傾向あり）")
