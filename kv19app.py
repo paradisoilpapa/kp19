@@ -301,7 +301,7 @@ if st.button("スコア計算実行"):
         return round(total, 2)
 
 
-        def convert_chaku_to_score(values):
+    def convert_chaku_to_score(values):
         scores = []
         for i, v in enumerate(values):
             v = v.strip()
@@ -315,8 +315,9 @@ if st.button("スコア計算実行"):
             except ValueError:
                 continue
         if not scores:
-            return 0.0  # ← ここだけで十分
+            return 0.0
         return round(sum(scores) / len(scores), 2)
+
 
 
 
