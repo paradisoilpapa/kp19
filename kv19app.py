@@ -261,6 +261,25 @@ if st.button("スコア計算実行"):
         else:
             return []
 
+    def score_from_tenscore_list(tenscore_list):
+        import pandas as pd
+    
+        df = pd.DataFrame({"得点": tenscore_list})
+        df["順位"] = df["得点"].rank(ascending=False, method="min").astype(int)
+    
+        # 基準点：2〜6位の平均
+        baseline = df[df["順位"].between(2, 6)]["得点"].mean()
+    
+        # 2〜4位だけ補正（差分の3％、必ず正の加点）
+        def apply_targeted_correction(row):
+            if row["順位"] in [2, 3, 4]:
+                correction = abs(baseline - row["得点"]) * 0.03
+                return round(correction, 3)
+            else:
+                return 0.0
+
+        df["最終補正値"] = df.apply(apply_targeted_correction, axis=1)
+        return df["最終補正値"].tolist()
 
 
 
@@ -390,25 +409,6 @@ def build_line_position_map(lines):
 line_order_map = build_line_position_map(lines)
 line_order = [line_order_map.get(i + 1, 0) for i in range(7)]
 
-def score_from_tenscore_list(tenscore_list):
-    import pandas as pd
-
-    df = pd.DataFrame({"得点": tenscore_list})
-    df["順位"] = df["得点"].rank(ascending=False, method="min").astype(int)
-
-    # 基準点：2〜6位の平均
-    baseline = df[df["順位"].between(2, 6)]["得点"].mean()
-
-    # 2〜4位だけ補正（差分の3％、必ず正の加点）
-    def apply_targeted_correction(row):
-        if row["順位"] in [2, 3, 4]:
-            correction = abs(baseline - row["得点"]) * 0.03
-            return round(correction, 3)
-        else:
-            return 0.0
-
-    df["最終補正値"] = df.apply(apply_targeted_correction, axis=1)
-    return df["最終補正値"].tolist()
 
 # --- グループ補正関数（line_defに基づきボーナスマップを作成） ---
 def compute_group_bonus(score_parts, line_def):
