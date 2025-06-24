@@ -574,105 +574,70 @@ except NameError:
     st.stop()
     
 
-# --- 必要モジュールのインポート ---
-import pandas as pd
+import pandas as pd 
+import itertools
 import streamlit as st
 
-# --- B回数列の統一（バック → B回数）---
-df.rename(columns={"バック": "B回数"}, inplace=True)
+# --- 競争得点はすでにStreamlitで取得済みの変数ratingを使用 ---
+# rating = [st.number_input(...)] は別箇所で実行されている想定
 
-# --- ユーザー入力されたB回数（バック回数）をdfへ格納 ---
-b_list = [st.session_state.get(f"b_point_{i+1}", 0) for i in range(len(df))]
+# --- final_score_parts は既に計算済みの得点補正など含むスコアリスト ---
+# final_score_parts = [...] ここも別で準備されている前提
 
-# --- 再発防止のチェック ---
-if len(b_list) != len(df):
-    st.error(f"⚠ B回数の入力数と選手数が一致していません")
-    st.stop()
+# DataFrame化
+df = pd.DataFrame(final_score_parts, columns=[
+    '車番', '脚質', '基本', '風補正', '着順補正', '得点補正',
+    '周回補正', 'SB印補正', 'ライン補正', 'バンク補正', '周長補正',
+    'グループ補正', '合計スコア'
+])
 
-# --- B回数をdfに格納 ---
-df["B回数"] = b_list
+# rating（競争得点）を追加
+df['競争得点'] = rating
 
-# --- 競争得点（ratingリスト）と車番をDataFrameに変換 ---
-score_df = pd.DataFrame({
-    "車番": list(range(1, 8)),
-    "得点": rating
-})
+# 競争得点順位を付与（大きい順）
+df['競争得点順位'] = df['競争得点'].rank(ascending=False, method='min').astype(int)
 
-# --- 得点順で2〜4位を抽出 ---
-subset = score_df.sort_values(by="得点", ascending=False).iloc[1:4]
-target_car_numbers = subset["車番"].tolist()
-
-# --- 該当車番のスコア情報を抽出 ---
-subset_scores = [row for row in final_score_parts if row[0] in target_car_numbers]
-
-# --- スコア順で並べて中央（2番目）を◎に ---
-subset_scores_sorted = sorted(subset_scores, key=lambda x: x[-1], reverse=True)
-anchor_car = subset_scores_sorted[1][0]  # ◎決定（得点2〜4位内でスコア中位）
-
-# --- ◎の所属ラインを本命ライン（A）として定義 ---
-anchor_line_idx = next(i for i, line in enumerate(lines) if anchor_car in line)
-line_roles = {i: "C" for i in range(len(lines))}  # 初期化：すべて漁夫
-line_roles[anchor_line_idx] = "A"  # 本命ラインを設定
-
-# --- Bライン候補：得点順1〜4位のうち◎以外の所属ライン ---
-b_candidates = score_df.sort_values(by="得点", ascending=False).iloc[:4]
-b_candidates = b_candidates[b_candidates["車番"] != anchor_car]
-b_line_scores = []
-
-for i, line in enumerate(lines):
-    if i == anchor_line_idx:
-        continue
-    line_score = b_candidates[b_candidates["車番"].isin(line)]["得点"].sum()
-    if line_score > 0:
-        b_line_scores.append((i, line_score))
-
-if b_line_scores:
-    b_line_idx = max(b_line_scores, key=lambda x: x[1])[0]
-    line_roles[b_line_idx] = "B"
-
-# --- 各役割ラインの車番抽出 ---
-a_line = lines[anchor_line_idx]
-b_cars = [car for idx, role in line_roles.items() if role == "B" for car in lines[idx]]
-c_cars = [car for idx, role in line_roles.items() if role == "C" for car in lines[idx]]
-
-# --- anchorライン内でスコア順ソート ---
-anchor_score_sorted = sorted(
-    [row for row in final_score_parts if row[0] in a_line],
-    key=lambda x: x[-1],
-    reverse=True
-)
-anchor_others = [row[0] for row in anchor_score_sorted if row[0] != anchor_car]
-
-# --- パターン①（◎-◎ライン-漁夫）構成 ---
-pattern_1 = [
-    tuple(sorted([anchor_car, x, y]))
-    for x in anchor_others
-    for y in c_cars
-    if len(set([anchor_car, x, y])) == 3
+# スコア情報を辞書リストに変換
+score_df = [
+    {
+        "車番": int(row["車番"]),
+        "得点": float(row["競争得点"]),
+        "得点順位": int(row["競争得点順位"]),
+        "スコア": float(row["合計スコア"])
+    }
+    for _, row in df.iterrows()
 ]
 
-# anchor（◎）を除いた対抗ラインの車番で構成
-b_only = [car for car in b_cars if car != anchor_car]
+# ◎（軸）選出：競争得点3・4位の中でスコア上位の1台
+anchor_candidates = [d for d in score_df if d["得点順位"] in [3, 4]]
+anchor = sorted(anchor_candidates, key=lambda x: x["スコア"], reverse=True)[0]
+anchor_car = anchor["車番"]
 
-pattern_2 = [
-    tuple(sorted([x, y, anchor_car]))
-    for i, x in enumerate(b_only)
-    for y in b_only[i+1:]
-]
+# ヒモ1〜3：競争得点5〜7位の全3車
+himo_567 = [d["車番"] for d in score_df if d["得点順位"] in [5, 6, 7]]
 
-# --- 重複除去・ソート ---
-pattern_1 = sorted(set(pattern_1))
-pattern_2 = sorted(set(pattern_2))
+# ヒモ4：得点1〜4位のうち、◎以外の最高得点者
+himo_1234 = [d for d in score_df if d["得点順位"] <= 4 and d["車番"] != anchor_car]
+himo_1234_top = sorted(himo_1234, key=lambda x: x["得点"], reverse=True)[0]["車番"]
 
-# --- 表示 ---
-st.markdown("### 🌟 フォーメーション構成")
-st.markdown(f"◆ 本線ライン（◎が所属）: {anchor_car} in {a_line}")
-st.markdown(f"◆ 対抗ライン: {b_cars} ／ 漁夫ライン: {c_cars}")
+# ヒモ候補確定（合計4車）
+himo_list = himo_567 + [himo_1234_top]
 
-st.markdown("#### ▶ パターン1：◎-◎ライン-漁夫")
-for p in pattern_1:
-    st.write(f"三連複 {p}")
+# 三連複（◎-ヒモ-ヒモ）6点構成
+bets = set()
+for comb in itertools.combinations(himo_list, 2):
+    bet = tuple(sorted([anchor_car] + list(comb)))
+    bets.add(bet)
 
-st.markdown("#### ▶ パターン2：対抗-対抗-◎")
-for p in pattern_2:
-    st.write(f"三連複 {p}")
+# 表示
+st.markdown("### 🎯 6点構成（確定版）")
+st.markdown(f"◎（競争得点3・4位からスコア上位）：{anchor_car}")
+st.markdown(f"ヒモ（得点5〜7位＋上位得点1台）：{himo_list}")
+
+st.markdown(f"👉 三連複 {len(bets)}点：")
+for b in sorted(bets):
+    st.markdown(f"- {b}")
+
+st.markdown("### 競争得点順位含む選手情報")
+st.dataframe(df.sort_values(by='競争得点順位'))
+
