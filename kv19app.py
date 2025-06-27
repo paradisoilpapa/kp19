@@ -30,107 +30,6 @@ position_multipliers = {
 # --- 基本スコア（脚質ごとの基準値） ---
 base_score = {'逃': 50.0, '両': 50.0, '追': 50.0}
 
-
-# --- 状態保持 ---
-if "selected_wind" not in st.session_state:
-    st.session_state.selected_wind = "無風"
-
-# --- 風＋ライン順に応じた補正スコア関数 ---
-def wind_straight_combo_adjust(kakushitsu, wind_direction, wind_speed, straight_length, line_order):
-    wind_adj = wind_coefficients.get(wind_direction, 0.0)
-    pos_multi = position_multipliers.get(line_order, 0.3)
-
-    if wind_direction == "無風" or wind_speed == 0:
-        return 0.0
-
-    if kakushitsu == "逃":
-        return round(wind_speed * wind_adj * 1.0 * pos_multi, 3)
-    elif kakushitsu == "両":
-        return round(wind_speed * wind_adj * 0.7 * pos_multi, 3)
-    elif kakushitsu == "追":
-        return round(wind_speed * wind_adj * 0.4 * pos_multi, 3)
-    return round(wind_speed * wind_adj * 0.5 * pos_multi, 3)
-
-# --- 会場別脚質補正スコア取得 ---
-def get_adjusted_base_score(keirin_name):
-    kettei_to_kakushitsu = {"逃": "逃", "捲": "両", "差": "追"}
-    base_score = {'逃': 50.0, '両': 50.0, '追': 50.0}
-
-    rates = keirin_data.get(keirin_name, {}).get("kettei_rate")
-    if not rates:
-        return base_score
-
-    adjusted_score = {}
-    for k, v in base_score.items():
-        matched_kettei = [kt for kt, kk in kettei_to_kakushitsu.items() if kk == k]
-        if not matched_kettei:
-            adjusted_score[k] = v
-            continue
-
-        rate = sum(rates.get(kt, 0.0) for kt in matched_kettei)
-        correction = (rate - 0.333) * 3.0
-        adjusted_score[k] = round(v + correction, 2)
-
-    return adjusted_score
-
-# --- 選手データと脚質補正の統合例（仮のplayers処理） ---
-# ※実際の選手データリストに応じて適宜調整すること
-selected_keirin = "函館"
-adjusted_scores = get_adjusted_base_score(selected_keirin)
-
-# 選手一覧を前提としたスコア格納処理（仮構成）
-if "players" in st.session_state:
-    for p in st.session_state.players:
-        kakushitsu = p.get("脚質", "追")
-        p["脚質スコア"] = adjusted_scores.get(kakushitsu, 50.0)
-
-
-
-# --- バンク・風条件セクション ---
-st.header("【バンク・風条件】")
-
-cols_top = st.columns(3)
-cols_mid = st.columns(3)
-cols_bot = st.columns(3)
-
-with cols_top[0]:
-    if st.button("左上"):
-        st.session_state.selected_wind = "左上"
-with cols_top[1]:
-    if st.button("上"):
-        st.session_state.selected_wind = "上"
-with cols_top[2]:
-    if st.button("右上"):
-        st.session_state.selected_wind = "右上"
-with cols_mid[0]:
-    if st.button("左"):
-        st.session_state.selected_wind = "左"
-with cols_mid[1]:
-    st.markdown("""
-    <div style='text-align:center; font-size:16px; line-height:1.6em;'>
-        ↑<br>［上］<br>
-        ← 左　　　右 →<br>
-        ［下］<br>↓<br>
-        □ ホーム→（ ゴール）
-    </div>
-    """, unsafe_allow_html=True)
-with cols_mid[2]:
-    if st.button("右"):
-        st.session_state.selected_wind = "右"
-with cols_bot[0]:
-    if st.button("左下"):
-        st.session_state.selected_wind = "左下"
-with cols_bot[1]:
-    if st.button("下"):
-        st.session_state.selected_wind = "下"
-with cols_bot[2]:
-    if st.button("右下"):
-        st.session_state.selected_wind = "右下"
-
-st.subheader(f"✅ 選択中の風向き：{st.session_state.selected_wind}")
-
-
-
 # ▼ 競輪場選択による自動入力
 keirin_data = {
     "函館": {"bank_angle": 30.6, "straight_length": 51.3, "bank_length": 400, "kettei_rate": {"逃": 0.23, "捲": 0.29, "差": 0.48}},
@@ -181,6 +80,111 @@ keirin_data = {
 
 selected_track = st.selectbox("▼ 競輪場選択（自動入力）", list(keirin_data.keys()))
 selected_info = keirin_data[selected_track]
+
+
+# --- 状態保持 ---
+if "selected_wind" not in st.session_state:
+    st.session_state.selected_wind = "無風"
+
+# --- 会場別脚質補正スコア取得 ---
+def get_adjusted_base_score(keirin_name):
+    kettei_to_kakushitsu = {"逃": "逃", "捲": "両", "差": "追"}
+    base_score = {'逃': 50.0, '両': 50.0, '追': 50.0}
+
+    rates = keirin_data.get(keirin_name, {}).get("kettei_rate")
+    if not rates:
+        return base_score
+
+    adjusted_score = {}
+    for k, v in base_score.items():
+        matched_kettei = [kt for kt, kk in kettei_to_kakushitsu.items() if kk == k]
+        if not matched_kettei:
+            adjusted_score[k] = v
+            continue
+
+        rate = sum(rates.get(kt, 0.0) for kt in matched_kettei)
+        correction = (rate - 0.333) * 3.0
+        adjusted_score[k] = round(v + correction, 2)
+
+    return adjusted_score
+
+# --- 選手データと脚質補正の統合例（仮のplayers処理） ---
+# ※実際の選手データリストに応じて適宜調整すること
+selected_keirin = "函館"
+adjusted_scores = get_adjusted_base_score(selected_keirin)
+
+# 選手一覧を前提としたスコア格納処理（仮構成）
+if "players" in st.session_state:
+    for p in st.session_state.players:
+        kakushitsu = p.get("脚質", "追")
+        p["脚質スコア"] = adjusted_scores.get(kakushitsu, 50.0)
+
+
+# --- 風＋ライン順に応じた補正スコア関数 ---
+def wind_straight_combo_adjust(kakushitsu, wind_direction, wind_speed, straight_length, line_order):
+    wind_adj = wind_coefficients.get(wind_direction, 0.0)
+    pos_multi = position_multipliers.get(line_order, 0.3)
+
+    if wind_direction == "無風" or wind_speed == 0:
+        return 0.0
+
+    if kakushitsu == "逃":
+        return round(wind_speed * wind_adj * 1.0 * pos_multi, 3)
+    elif kakushitsu == "両":
+        return round(wind_speed * wind_adj * 0.7 * pos_multi, 3)
+    elif kakushitsu == "追":
+        return round(wind_speed * wind_adj * 0.4 * pos_multi, 3)
+    return round(wind_speed * wind_adj * 0.5 * pos_multi, 3)
+
+
+
+
+# --- バンク・風条件セクション ---
+st.header("【バンク・風条件】")
+
+cols_top = st.columns(3)
+cols_mid = st.columns(3)
+cols_bot = st.columns(3)
+
+with cols_top[0]:
+    if st.button("左上"):
+        st.session_state.selected_wind = "左上"
+with cols_top[1]:
+    if st.button("上"):
+        st.session_state.selected_wind = "上"
+with cols_top[2]:
+    if st.button("右上"):
+        st.session_state.selected_wind = "右上"
+with cols_mid[0]:
+    if st.button("左"):
+        st.session_state.selected_wind = "左"
+with cols_mid[1]:
+    st.markdown("""
+    <div style='text-align:center; font-size:16px; line-height:1.6em;'>
+        ↑<br>［上］<br>
+        ← 左　　　右 →<br>
+        ［下］<br>↓<br>
+        □ ホーム→（ ゴール）
+    </div>
+    """, unsafe_allow_html=True)
+with cols_mid[2]:
+    if st.button("右"):
+        st.session_state.selected_wind = "右"
+with cols_bot[0]:
+    if st.button("左下"):
+        st.session_state.selected_wind = "左下"
+with cols_bot[1]:
+    if st.button("下"):
+        st.session_state.selected_wind = "下"
+with cols_bot[2]:
+    if st.button("右下"):
+        st.session_state.selected_wind = "右下"
+
+st.subheader(f"✅ 選択中の風向き：{st.session_state.selected_wind}")
+
+
+
+
 
 # ▼ 風速入力（手動）
 wind_speed = st.number_input("風速(m/s)", min_value=0.0, max_value=30.0, step=0.1, value=3.0)
