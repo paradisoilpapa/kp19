@@ -28,7 +28,8 @@ position_multipliers = {
 }
 
 # --- 基本スコア（脚質ごとの基準値） ---
-base_score = {'逃': 4.7, '両': 4.8, '追': 5.0}
+base_score = {'逃': 50.0, '両': 50.0, '追': 50.0}
+
 
 # --- 状態保持 ---
 if "selected_wind" not in st.session_state:
@@ -49,6 +50,30 @@ def wind_straight_combo_adjust(kakushitsu, wind_direction, wind_speed, straight_
     elif kakushitsu == "追":
         return round(wind_speed * wind_adj * 0.4 * pos_multi, 3)
     return round(wind_speed * wind_adj * 0.5 * pos_multi, 3)
+
+# --- 会場別脚質補正スコア取得 ---
+def get_adjusted_base_score(keirin_name):
+    kettei_to_kakushitsu = {"逃": "逃", "捲": "両", "差": "追"}
+    base_score = {'逃': 50.0, '両': 50.0, '追': 50.0}
+
+    rates = keirin_data.get(keirin_name, {}).get("kettei_rate")
+    if not rates:
+        return base_score
+
+    adjusted_score = {}
+    for k, v in base_score.items():
+        matched_kettei = [kt for kt, kk in kettei_to_kakushitsu.items() if kk == k]
+        if not matched_kettei:
+            adjusted_score[k] = v
+            continue
+
+        rate = sum(rates.get(kt, 0.0) for kt in matched_kettei)
+        correction = (rate - 0.333) * 3.0
+        adjusted_score[k] = round(v + correction, 2)
+
+    return adjusted_score
+
+
 
 # --- バンク・風条件セクション ---
 st.header("【バンク・風条件】")
@@ -97,49 +122,49 @@ st.subheader(f"✅ 選択中の風向き：{st.session_state.selected_wind}")
 
 # ▼ 競輪場選択による自動入力
 keirin_data = {
-    "函館": {"bank_angle": 30.6, "straight_length": 51.3, "bank_length": 400},
-    "青森": {"bank_angle": 32.3, "straight_length": 58.9, "bank_length": 400},
-    "いわき平": {"bank_angle": 32.9, "straight_length": 62.7, "bank_length": 400},
-    "弥彦": {"bank_angle": 32.4, "straight_length": 63.1, "bank_length": 400},
-    "前橋": {"bank_angle": 36.0, "straight_length": 46.7, "bank_length": 335},
-    "取手": {"bank_angle": 31.5, "straight_length": 54.8, "bank_length": 400},
-    "宇都宮": {"bank_angle": 25.8, "straight_length": 63.3, "bank_length": 500},
-    "大宮": {"bank_angle": 26.3, "straight_length": 66.7, "bank_length": 500},
-    "西武園": {"bank_angle": 29.4, "straight_length": 47.6, "bank_length": 400},
-    "京王閣": {"bank_angle": 32.2, "straight_length": 51.5, "bank_length": 400},
-    "立川": {"bank_angle": 31.2, "straight_length": 58.0, "bank_length": 400},
-    "松戸": {"bank_angle": 29.8, "straight_length": 38.2, "bank_length": 333},
-    "川崎": {"bank_angle": 32.2, "straight_length": 58.0, "bank_length": 400},
-    "平塚": {"bank_angle": 31.5, "straight_length": 54.2, "bank_length": 400},
-    "小田原": {"bank_angle": 35.6, "straight_length": 36.1, "bank_length": 333},
-    "伊東": {"bank_angle": 34.7, "straight_length": 46.6, "bank_length": 333},
-    "静岡": {"bank_angle": 30.7, "straight_length": 56.4, "bank_length": 400},
-    "名古屋": {"bank_angle": 34.0, "straight_length": 58.8, "bank_length": 400},
-    "岐阜": {"bank_angle": 32.3, "straight_length": 59.3, "bank_length": 400},
-    "大垣": {"bank_angle": 30.6, "straight_length": 56.0, "bank_length": 400},
-    "豊橋": {"bank_angle": 33.8, "straight_length": 60.3, "bank_length": 400},
-    "富山": {"bank_angle": 33.7, "straight_length": 43.0, "bank_length": 333},
-    "松坂": {"bank_angle": 34.4, "straight_length": 61.5, "bank_length": 400},
-    "四日市": {"bank_angle": 32.3, "straight_length": 62.4, "bank_length": 400},
-    "福井": {"bank_angle": 31.5, "straight_length": 52.8, "bank_length": 400},
-    "奈良": {"bank_angle": 33.4, "straight_length": 38.0, "bank_length": 333},
-    "向日町": {"bank_angle": 30.5, "straight_length": 47.3, "bank_length": 400},
-    "和歌山": {"bank_angle": 32.3, "straight_length": 59.9, "bank_length": 400},
-    "岸和田": {"bank_angle": 30.9, "straight_length": 56.7, "bank_length": 400},
-    "玉野": {"bank_angle": 30.6, "straight_length": 47.9, "bank_length": 400},
-    "広島": {"bank_angle": 30.8, "straight_length": 57.9, "bank_length": 400},
-    "防府": {"bank_angle": 34.7, "straight_length": 42.5, "bank_length": 333},
-    "高松": {"bank_angle": 33.3, "straight_length": 54.8, "bank_length": 400},
-    "小松島": {"bank_angle": 29.8, "straight_length": 55.5, "bank_length": 400},
-    "高知": {"bank_angle": 24.5, "straight_length": 52.0, "bank_length": 500},
-    "松山": {"bank_angle": 34.0, "straight_length": 58.6, "bank_length": 400},
-    "小倉": {"bank_angle": 34.0, "straight_length": 56.9, "bank_length": 400},
-    "久留米": {"bank_angle": 31.5, "straight_length": 50.7, "bank_length": 400},
-    "武雄": {"bank_angle": 32.0, "straight_length": 64.4, "bank_length": 400},
-    "佐世保": {"bank_angle": 31.5, "straight_length": 40.2, "bank_length": 400},
-    "別府": {"bank_angle": 33.7, "straight_length": 59.9, "bank_length": 400},
-    "熊本": {"bank_angle": 34.3, "straight_length": 60.3, "bank_length": 400},
-    "手入力": {"bank_angle": 30.0, "straight_length": 52.0, "bank_length": 400}
+    "函館": {"bank_angle": 30.6, "straight_length": 51.3, "bank_length": 400, "kettei_rate": {"逃": 0.23, "捲": 0.29, "差": 0.48}},
+    "青森": {"bank_angle": 32.3, "straight_length": 58.9, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "いわき平": {"bank_angle": 32.9, "straight_length": 62.7, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "弥彦": {"bank_angle": 32.4, "straight_length": 63.1, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "前橋": {"bank_angle": 36.0, "straight_length": 46.7, "bank_length": 335, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "取手": {"bank_angle": 31.5, "straight_length": 54.8, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "宇都宮": {"bank_angle": 25.8, "straight_length": 63.3, "bank_length": 500, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "大宮": {"bank_angle": 26.3, "straight_length": 66.7, "bank_length": 500, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "西武園": {"bank_angle": 29.4, "straight_length": 47.6, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "京王閣": {"bank_angle": 32.2, "straight_length": 51.5, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "立川": {"bank_angle": 31.2, "straight_length": 58.0, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "松戸": {"bank_angle": 29.8, "straight_length": 38.2, "bank_length": 333, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "川崎": {"bank_angle": 32.2, "straight_length": 58.0, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "平塚": {"bank_angle": 31.5, "straight_length": 54.2, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "小田原": {"bank_angle": 35.6, "straight_length": 36.1, "bank_length": 333, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "伊東": {"bank_angle": 34.7, "straight_length": 46.6, "bank_length": 333, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "静岡": {"bank_angle": 30.7, "straight_length": 56.4, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "名古屋": {"bank_angle": 34.0, "straight_length": 58.8, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "岐阜": {"bank_angle": 32.3, "straight_length": 59.3, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "大垣": {"bank_angle": 30.6, "straight_length": 56.0, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "豊橋": {"bank_angle": 33.8, "straight_length": 60.3, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "富山": {"bank_angle": 33.7, "straight_length": 43.0, "bank_length": 333, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "松坂": {"bank_angle": 34.4, "straight_length": 61.5, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "四日市": {"bank_angle": 32.3, "straight_length": 62.4, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "福井": {"bank_angle": 31.5, "straight_length": 52.8, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "奈良": {"bank_angle": 33.4, "straight_length": 38.0, "bank_length": 333, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "向日町": {"bank_angle": 30.5, "straight_length": 47.3, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "和歌山": {"bank_angle": 32.3, "straight_length": 59.9, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "岸和田": {"bank_angle": 30.9, "straight_length": 56.7, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "玉野": {"bank_angle": 30.6, "straight_length": 47.9, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "広島": {"bank_angle": 30.8, "straight_length": 57.9, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "防府": {"bank_angle": 34.7, "straight_length": 42.5, "bank_length": 333, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "高松": {"bank_angle": 33.3, "straight_length": 54.8, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "小松島": {"bank_angle": 29.8, "straight_length": 55.5, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "高知": {"bank_angle": 24.5, "straight_length": 52.0, "bank_length": 500, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "松山": {"bank_angle": 34.0, "straight_length": 58.6, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "小倉": {"bank_angle": 34.0, "straight_length": 56.9, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "久留米": {"bank_angle": 31.5, "straight_length": 50.7, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "武雄": {"bank_angle": 32.0, "straight_length": 64.4, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "佐世保": {"bank_angle": 31.5, "straight_length": 40.2, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "別府": {"bank_angle": 33.7, "straight_length": 59.9, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "熊本": {"bank_angle": 34.3, "straight_length": 60.3, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
+    "手入力": {"bank_angle": 30.0, "straight_length": 52.0, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}}
 }
 
 
