@@ -73,6 +73,17 @@ def get_adjusted_base_score(keirin_name):
 
     return adjusted_score
 
+# --- 選手データと脚質補正の統合例（仮のplayers処理） ---
+# ※実際の選手データリストに応じて適宜調整すること
+selected_keirin = "函館"
+adjusted_scores = get_adjusted_base_score(selected_keirin)
+
+# 選手一覧を前提としたスコア格納処理（仮構成）
+if "players" in st.session_state:
+    for p in st.session_state.players:
+        kakushitsu = p.get("脚質", "追")
+        p["脚質スコア"] = adjusted_scores.get(kakushitsu, 50.0)
+
 
 
 # --- バンク・風条件セクション ---
