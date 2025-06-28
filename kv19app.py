@@ -30,95 +30,9 @@ position_multipliers = {
 # --- 基本スコア（脚質ごとの基準値） ---
 base_score = {'逃': 4.72, '両': 5.05, '追': 5.23}
 
-# ▼ 競輪場選択による自動入力
-keirin_data = {
-    "函館": {"bank_angle": 30.6, "straight_length": 51.3, "bank_length": 400, "kettei_rate": {"逃": 0.23, "捲": 0.29, "差": 0.48}},
-    "青森": {"bank_angle": 32.3, "straight_length": 58.9, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "いわき平": {"bank_angle": 32.9, "straight_length": 62.7, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "弥彦": {"bank_angle": 32.4, "straight_length": 63.1, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "前橋": {"bank_angle": 36.0, "straight_length": 46.7, "bank_length": 335, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "取手": {"bank_angle": 31.5, "straight_length": 54.8, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "宇都宮": {"bank_angle": 25.8, "straight_length": 63.3, "bank_length": 500, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "大宮": {"bank_angle": 26.3, "straight_length": 66.7, "bank_length": 500, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "西武園": {"bank_angle": 29.4, "straight_length": 47.6, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "京王閣": {"bank_angle": 32.2, "straight_length": 51.5, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "立川": {"bank_angle": 31.2, "straight_length": 58.0, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "松戸": {"bank_angle": 29.8, "straight_length": 38.2, "bank_length": 333, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "川崎": {"bank_angle": 32.2, "straight_length": 58.0, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "平塚": {"bank_angle": 31.5, "straight_length": 54.2, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "小田原": {"bank_angle": 35.6, "straight_length": 36.1, "bank_length": 333, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "伊東": {"bank_angle": 34.7, "straight_length": 46.6, "bank_length": 333, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "静岡": {"bank_angle": 30.7, "straight_length": 56.4, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "名古屋": {"bank_angle": 34.0, "straight_length": 58.8, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "岐阜": {"bank_angle": 32.3, "straight_length": 59.3, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "大垣": {"bank_angle": 30.6, "straight_length": 56.0, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "豊橋": {"bank_angle": 33.8, "straight_length": 60.3, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "富山": {"bank_angle": 33.7, "straight_length": 43.0, "bank_length": 333, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "松坂": {"bank_angle": 34.4, "straight_length": 61.5, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "四日市": {"bank_angle": 32.3, "straight_length": 62.4, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "福井": {"bank_angle": 31.5, "straight_length": 52.8, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "奈良": {"bank_angle": 33.4, "straight_length": 38.0, "bank_length": 333, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "向日町": {"bank_angle": 30.5, "straight_length": 47.3, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "和歌山": {"bank_angle": 32.3, "straight_length": 59.9, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "岸和田": {"bank_angle": 30.9, "straight_length": 56.7, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "玉野": {"bank_angle": 30.6, "straight_length": 47.9, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "広島": {"bank_angle": 30.8, "straight_length": 57.9, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "防府": {"bank_angle": 34.7, "straight_length": 42.5, "bank_length": 333, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "高松": {"bank_angle": 33.3, "straight_length": 54.8, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "小松島": {"bank_angle": 29.8, "straight_length": 55.5, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "高知": {"bank_angle": 24.5, "straight_length": 52.0, "bank_length": 500, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "松山": {"bank_angle": 34.0, "straight_length": 58.6, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "小倉": {"bank_angle": 34.0, "straight_length": 56.9, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "久留米": {"bank_angle": 31.5, "straight_length": 50.7, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "武雄": {"bank_angle": 32.0, "straight_length": 64.4, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "佐世保": {"bank_angle": 31.5, "straight_length": 40.2, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "別府": {"bank_angle": 33.7, "straight_length": 59.9, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "熊本": {"bank_angle": 34.3, "straight_length": 60.3, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}},
-    "手入力": {"bank_angle": 30.0, "straight_length": 52.0, "bank_length": 400, "kettei_rate": {"逃": 0.26, "捲": 0.32, "差": 0.42}}
-}
-
-
-selected_track = st.selectbox("▼ 競輪場選択（自動入力）", list(keirin_data.keys()))
-selected_info = keirin_data[selected_track]
-
-
 # --- 状態保持 ---
 if "selected_wind" not in st.session_state:
     st.session_state.selected_wind = "無風"
-
-# --- 会場別脚質補正スコア取得 ---
-def get_adjusted_base_score(keirin_name):
-    kettei_to_kakushitsu = {"逃": "逃", "捲": "両", "差": "追"}
-    base_score = {'逃': 50.0, '両': 50.0, '追': 50.0}
-
-    rates = keirin_data.get(keirin_name, {}).get("kettei_rate")
-    if not rates:
-        return base_score
-
-    adjusted_score = {}
-    for k, v in base_score.items():
-        matched_kettei = [kt for kt, kk in kettei_to_kakushitsu.items() if kk == k]
-        if not matched_kettei:
-            adjusted_score[k] = v
-            continue
-
-        rate = sum(rates.get(kt, 0.0) for kt in matched_kettei)
-        correction = (rate - 0.333) * 3.0
-        adjusted_score[k] = round(v + correction, 2)
-
-    return adjusted_score
-
-# --- 選手データと脚質補正の統合例（仮のplayers処理） ---
-# ※実際の選手データリストに応じて適宜調整すること
-selected_keirin = "函館"
-adjusted_scores = get_adjusted_base_score(selected_keirin)
-
-# 選手一覧を前提としたスコア格納処理（仮構成）
-if "players" in st.session_state:
-    for p in st.session_state.players:
-        kakushitsu = p.get("脚質", "追")
-        p["脚質スコア"] = adjusted_scores.get(kakushitsu, 50.0)
-
 
 # --- 風＋ライン順に応じた補正スコア関数 ---
 def wind_straight_combo_adjust(kakushitsu, wind_direction, wind_speed, straight_length, line_order):
@@ -135,9 +49,6 @@ def wind_straight_combo_adjust(kakushitsu, wind_direction, wind_speed, straight_
     elif kakushitsu == "追":
         return round(wind_speed * wind_adj * 0.4 * pos_multi, 3)
     return round(wind_speed * wind_adj * 0.5 * pos_multi, 3)
-
-
-
 
 # --- バンク・風条件セクション ---
 st.header("【バンク・風条件】")
@@ -184,7 +95,56 @@ st.subheader(f"✅ 選択中の風向き：{st.session_state.selected_wind}")
 
 
 
+# ▼ 競輪場選択による自動入力
+keirin_data = {
+    "函館": {"bank_angle": 30.6, "straight_length": 51.3, "bank_length": 400},
+    "青森": {"bank_angle": 32.3, "straight_length": 58.9, "bank_length": 400},
+    "いわき平": {"bank_angle": 32.9, "straight_length": 62.7, "bank_length": 400},
+    "弥彦": {"bank_angle": 32.4, "straight_length": 63.1, "bank_length": 400},
+    "前橋": {"bank_angle": 36.0, "straight_length": 46.7, "bank_length": 335},
+    "取手": {"bank_angle": 31.5, "straight_length": 54.8, "bank_length": 400},
+    "宇都宮": {"bank_angle": 25.8, "straight_length": 63.3, "bank_length": 500},
+    "大宮": {"bank_angle": 26.3, "straight_length": 66.7, "bank_length": 500},
+    "西武園": {"bank_angle": 29.4, "straight_length": 47.6, "bank_length": 400},
+    "京王閣": {"bank_angle": 32.2, "straight_length": 51.5, "bank_length": 400},
+    "立川": {"bank_angle": 31.2, "straight_length": 58.0, "bank_length": 400},
+    "松戸": {"bank_angle": 29.8, "straight_length": 38.2, "bank_length": 333},
+    "川崎": {"bank_angle": 32.2, "straight_length": 58.0, "bank_length": 400},
+    "平塚": {"bank_angle": 31.5, "straight_length": 54.2, "bank_length": 400},
+    "小田原": {"bank_angle": 35.6, "straight_length": 36.1, "bank_length": 333},
+    "伊東": {"bank_angle": 34.7, "straight_length": 46.6, "bank_length": 333},
+    "静岡": {"bank_angle": 30.7, "straight_length": 56.4, "bank_length": 400},
+    "名古屋": {"bank_angle": 34.0, "straight_length": 58.8, "bank_length": 400},
+    "岐阜": {"bank_angle": 32.3, "straight_length": 59.3, "bank_length": 400},
+    "大垣": {"bank_angle": 30.6, "straight_length": 56.0, "bank_length": 400},
+    "豊橋": {"bank_angle": 33.8, "straight_length": 60.3, "bank_length": 400},
+    "富山": {"bank_angle": 33.7, "straight_length": 43.0, "bank_length": 333},
+    "松坂": {"bank_angle": 34.4, "straight_length": 61.5, "bank_length": 400},
+    "四日市": {"bank_angle": 32.3, "straight_length": 62.4, "bank_length": 400},
+    "福井": {"bank_angle": 31.5, "straight_length": 52.8, "bank_length": 400},
+    "奈良": {"bank_angle": 33.4, "straight_length": 38.0, "bank_length": 333},
+    "向日町": {"bank_angle": 30.5, "straight_length": 47.3, "bank_length": 400},
+    "和歌山": {"bank_angle": 32.3, "straight_length": 59.9, "bank_length": 400},
+    "岸和田": {"bank_angle": 30.9, "straight_length": 56.7, "bank_length": 400},
+    "玉野": {"bank_angle": 30.6, "straight_length": 47.9, "bank_length": 400},
+    "広島": {"bank_angle": 30.8, "straight_length": 57.9, "bank_length": 400},
+    "防府": {"bank_angle": 34.7, "straight_length": 42.5, "bank_length": 333},
+    "高松": {"bank_angle": 33.3, "straight_length": 54.8, "bank_length": 400},
+    "小松島": {"bank_angle": 29.8, "straight_length": 55.5, "bank_length": 400},
+    "高知": {"bank_angle": 24.5, "straight_length": 52.0, "bank_length": 500},
+    "松山": {"bank_angle": 34.0, "straight_length": 58.6, "bank_length": 400},
+    "小倉": {"bank_angle": 34.0, "straight_length": 56.9, "bank_length": 400},
+    "久留米": {"bank_angle": 31.5, "straight_length": 50.7, "bank_length": 400},
+    "武雄": {"bank_angle": 32.0, "straight_length": 64.4, "bank_length": 400},
+    "佐世保": {"bank_angle": 31.5, "straight_length": 40.2, "bank_length": 400},
+    "別府": {"bank_angle": 33.7, "straight_length": 59.9, "bank_length": 400},
+    "熊本": {"bank_angle": 34.3, "straight_length": 60.3, "bank_length": 400},
+    "手入力": {"bank_angle": 30.0, "straight_length": 52.0, "bank_length": 400}
+}
 
+
+selected_track = st.selectbox("▼ 競輪場選択（自動入力）", list(keirin_data.keys()))
+selected_info = keirin_data[selected_track]
 
 # ▼ 風速入力（手動）
 wind_speed = st.number_input("風速(m/s)", min_value=0.0, max_value=30.0, step=0.1, value=3.0)
@@ -618,26 +578,20 @@ import pandas as pd
 import itertools
 import streamlit as st
 
-# --- 競争得点はすでにStreamlitで取得済みの変数ratingを使用 ---
-# rating = [st.number_input(...)] は別箇所で実行されている想定
+# --- 競争得点とスコアは別途取得済み前提 ---
+# rating = [...]
+# final_score_parts = [...]
 
-# --- final_score_parts は既に計算済みの得点補正など含むスコアリスト ---
-# final_score_parts = [...] ここも別で準備されている前提
-
-# DataFrame化
+# --- DataFrame 構築 ---
 df = pd.DataFrame(final_score_parts, columns=[
     '車番', '脚質', '基本', '風補正', '着順補正', '得点補正',
     '周回補正', 'SB印補正', 'ライン補正', 'バンク補正', '周長補正',
     'グループ補正', '合計スコア'
 ])
-
-# rating（競争得点）を追加
 df['競争得点'] = rating
-
-# 競争得点順位を付与（大きい順）
 df['競争得点順位'] = df['競争得点'].rank(ascending=False, method='min').astype(int)
 
-# スコア情報を辞書リストに変換
+# --- score_df構築 ---
 score_df = [
     {
         "車番": int(row["車番"]),
@@ -648,36 +602,54 @@ score_df = [
     for _, row in df.iterrows()
 ]
 
-# ◎（軸）選出：競争得点3・4位の中でスコア上位の1台
-anchor_candidates = [d for d in score_df if d["得点順位"] in [3, 4]]
-anchor = sorted(anchor_candidates, key=lambda x: x["スコア"], reverse=True)[0]
-anchor_car = anchor["車番"]
+# ◎：競争得点2・3・4位からスコア中位1車
+anchor_candidates = [d for d in score_df if d["得点順位"] in [2, 3, 4]]
+anchor = sorted(anchor_candidates, key=lambda x: x["スコア"])[1]
+anchor_no = anchor["車番"]
 
-# ヒモ1〜3：競争得点5〜7位の全3車
-himo_567 = [d["車番"] for d in score_df if d["得点順位"] in [5, 6, 7]]
+# 対抗ライン1位、漁夫ライン1位、ヒモ③（得点1位）を候補に
+# ※ライン情報は別途。ここでは仮に車番で指定（例: 5, 6, 1）
+taikou = 5  # 対抗ライン
+gyofu = 6   # 漁夫の利ライン
+himo3_raw = 1  # 得点1位 or ◎のライン内得点1位
 
-# ヒモ4：得点1〜4位のうち、◎以外の最高得点者
-himo_1234 = [d for d in score_df if d["得点順位"] <= 4 and d["車番"] != anchor_car]
-himo_1234_top = sorted(himo_1234, key=lambda x: x["得点"], reverse=True)[0]["車番"]
+# スコア上位2車を2列目に
+candidate_ids = list(set([taikou, gyofu, himo3_raw]))
+candidate_scores = [d for d in score_df if d["車番"] in candidate_ids]
+second_row = sorted(candidate_scores, key=lambda x: x["スコア"], reverse=True)[:2]
+second_nos = [d["車番"] for d in second_row]
 
-# ヒモ候補確定（合計4車）
-himo_list = himo_567 + [himo_1234_top]
+# 残りを3列目候補に
+third_base = list(set(candidate_ids) - set(second_nos))
 
-# 三連複（◎-ヒモ-ヒモ）6点構成
+# ヒモ①②：得点5〜7位からスコア上位2車
+low_rank = [d for d in score_df if d["得点順位"] in [5, 6, 7]]
+low_sorted = sorted(low_rank, key=lambda x: x["スコア"], reverse=True)[:2]
+himo_1 = low_sorted[0]["車番"]
+himo_2 = low_sorted[1]["車番"]
+
+# ヒモ④：得点2〜4位から◎以外でスコア上位1車
+up_candidates = [d for d in score_df if d["得点順位"] in [2, 3, 4] and d["車番"] != anchor_no]
+himo_4 = max(up_candidates, key=lambda x: x["スコア"])["車番"]
+
+# 3列目まとめ（重複除去）
+himo_list = list(set([himo_1, himo_2, himo_4] + third_base))
+
+# 三連複構成（◎-ヒモ-ヒモ）
 bets = set()
-for comb in itertools.combinations(himo_list, 2):
-    bet = tuple(sorted([anchor_car] + list(comb)))
-    bets.add(bet)
+for a, b in itertools.combinations(himo_list, 2):
+    combo = tuple(sorted([anchor_no, a, b]))
+    bets.add(combo)
 
-# 表示
-st.markdown("### 🎯 6点構成（確定版）")
-st.markdown(f"◎（競争得点3・4位からスコア上位）：{anchor_car}")
-st.markdown(f"ヒモ（得点5〜7位＋上位得点1台）：{himo_list}")
-
-st.markdown(f"👉 三連複 {len(bets)}点：")
+# --- 表示 ---
+st.markdown("### 🌟 三連複構成（ハイブリッド）")
+st.markdown(f"◎：{anchor_no}")
+st.markdown(f"2列目（スコア上位）：{second_nos}")
+st.markdown(f"3列目候補：{sorted(himo_list)}")
+st.markdown(f"🔹 三連複 {len(bets)}点：")
 for b in sorted(bets):
     st.markdown(f"- {b}")
 
-st.markdown("### 競争得点順位含む選手情報")
+# --- 確認用：競争得点順位含むデータ ---
+st.markdown("### 選手情報（得点順）")
 st.dataframe(df.sort_values(by='競争得点順位'))
-
