@@ -605,24 +605,29 @@ score_df = [
     for _, row in df.iterrows()
 ]
 
-# ◎：競争得点2・3・4位からスコア中位1車
+# ◎：競争得点2〜4位からスコア中位を選出
 anchor_candidates = [d for d in score_df if d["得点順位"] in [2, 3, 4]]
-anchor = sorted(anchor_candidates, key=lambda x: x["スコア"])[1]
+if len(anchor_candidates) < 3:
+    st.error("◎候補が3車未満です。スコア中位が選べません。")
+    st.stop()
+anchor_sorted = sorted(anchor_candidates, key=lambda x: x["スコア"])
+anchor = anchor_sorted[1]  # 中位
 anchor_no = anchor["車番"]
 
-# 対抗ライン1位、漁夫ライン1位、ヒモ③（得点1位 or ◎ライン内得点1位）
-# ※ライン情報は別途取得する必要あり。仮に車番で指定
-taikou = 5  # 対抗ライン代表
-gyofu = 6   # 漁夫ライン代表
-himo3_raw = 1  # 得点1位 or ◎のライン内得点1位
+# 対抗ライン1位、漁夫ライン1位、ヒモ③（得点1位 or ◎ライン内得点1位）を仮置き
+# ※ライン情報は別途取得必須
+# 以下仮値（例）
+taikou = 5
+gyofu = 6
+himo3_raw = 1
 
-# スコア上位2車を2列目に
+# 対象候補からスコア上位2車を選び2列目とする
 candidate_ids = list(set([taikou, gyofu, himo3_raw]))
 candidate_scores = [d for d in score_df if d["車番"] in candidate_ids]
 second_row = sorted(candidate_scores, key=lambda x: x["スコア"], reverse=True)[:2]
 second_nos = [d["車番"] for d in second_row]
 
-# 残りを3列目候補に
+# 残りの候補を3列目へ
 third_base = list(set(candidate_ids) - set(second_nos))
 
 # ヒモ①②：得点5〜9位からスコア上位2車
@@ -633,10 +638,13 @@ himo_2 = low_sorted[1]["車番"]
 
 # ヒモ④：得点2〜4位から◎以外でスコア上位1車
 up_candidates = [d for d in score_df if d["得点順位"] in [2, 3, 4] and d["車番"] != anchor_no]
-himo_4 = max(up_candidates, key=lambda x: x["スコア"])["車番"]
+if up_candidates:
+    himo_4 = max(up_candidates, key=lambda x: x["スコア"])["車番"]
+else:
+    himo_4 = None
 
 # 3列目まとめ（重複除去）
-himo_list = list(set([himo_1, himo_2, himo_4] + third_base))
+himo_list = list(set([himo_1, himo_2] + third_base + ([himo_4] if himo_4 else [])))
 
 # 三連複構成（◎-ヒモ-ヒモ）
 bets = set()
