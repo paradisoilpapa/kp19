@@ -4,7 +4,7 @@ import pandas as pd
 # --- ページ設定 ---
 st.set_page_config(page_title="ライン競輪スコア計算（完全統一版）", layout="wide")
 
-st.title("⭐ ライン競輪スコア計算（7車ライン＋欠番対応）⭐")
+st.title("⭐ ライン競輪スコア計算（9車ライン＋欠番対応）⭐")
 
 # --- 風向補正係数 ---
 wind_coefficients = {
@@ -28,7 +28,7 @@ position_multipliers = {
 }
 
 # --- 基本スコア（脚質ごとの基準値） ---
-base_score = {'逃': 4.6, '両': 4.9, '追': 5.5}
+base_score = {'逃': 4.972, '両': 5.005, '追': 5.023}
 
 # --- 状態保持 ---
 if "selected_wind" not in st.session_state:
@@ -182,7 +182,7 @@ for k, val in kakushitsu_inputs.items():
     for c in val:
         if c.isdigit():
             n = int(c)
-            if 1 <= n <= 7:
+            if 1 <= n <= 9:
                 car_to_kakushitsu[n] = k
 
 st.subheader("▼ 前々走・前走の着順入力（1〜9着 または 0＝落車）")
@@ -190,7 +190,7 @@ st.subheader("▼ 前々走・前走の着順入力（1〜9着 または 0＝落
 # 7選手 × 2走分
 chaku_inputs = []  # [[前々走, 前走], ..., [前々走, 前走]]
 
-for i in range(7):
+for i in range(9):
     col1, col2 = st.columns(2)
     with col1:
         chaku1 = st.text_input(f"{i+1}番【前々走】", value="", key=f"chaku1_{i}")
@@ -201,31 +201,33 @@ for i in range(7):
 
 
 st.subheader("▼ 競争得点入力")
-rating = [st.number_input(f"{i+1}番得点", value=55.0, step=0.1, key=f"rate_{i}") for i in range(7)]
+rating = [st.number_input(f"{i+1}番得点", value=55.0, step=0.1, key=f"rate_{i}") for i in range(9)]
 
 st.subheader("▼ 予想隊列入力（数字、欠の場合は空欄）")
-tairetsu = [st.text_input(f"{i+1}番隊列順位", key=f"tai_{i}") for i in range(7)]
+tairetsu = [st.text_input(f"{i+1}番隊列順位", key=f"tai_{i}") for i in range(9)]
 
 
 # --- S・B 入力（回数を数値で入力） ---
 st.subheader("▼ S・B 入力（各選手のS・B回数を入力）")
 
-for i in range(7):
+for i in range(9):
     st.markdown(f"**{i+1}番**")
     s_val = st.number_input("S回数", min_value=0, max_value=99, value=0, step=1, key=f"s_point_{i+1}")
     b_val = st.number_input("B回数", min_value=0, max_value=99, value=0, step=1, key=f"b_point_{i+1}")
 
 
-# --- ライン構成入力（最大7ライン、単騎含む自由構成） ---
-st.subheader("▼ ライン構成入力（最大7ライン：単騎も1ラインとして扱う）")
+# --- ライン構成入力（最大9ライン、単騎含む自由構成） ---
+st.subheader("▼ ライン構成入力（最大9ライン：単騎も1ラインとして扱う）")
 
-line_1 = st.text_input("ライン1（例：4）", key="line_1", max_chars=7)
-line_2 = st.text_input("ライン2（例：12）", key="line_2", max_chars=7)
-line_3 = st.text_input("ライン3（例：35）", key="line_3", max_chars=7)
-line_4 = st.text_input("ライン4（例：7）", key="line_4", max_chars=7)
-line_5 = st.text_input("ライン5（例：6）", key="line_5", max_chars=7)
-line_6 = st.text_input("ライン6（任意）", key="line_6", max_chars=7)
-line_7 = st.text_input("ライン7（任意）", key="line_7", max_chars=7)
+line_1 = st.text_input("ライン1（例：4）", key="line_1", max_chars=9)
+line_2 = st.text_input("ライン2（例：12）", key="line_2", max_chars=9)
+line_3 = st.text_input("ライン3（例：35）", key="line_3", max_chars=9)
+line_4 = st.text_input("ライン4（例：7）", key="line_4", max_chars=9)
+line_5 = st.text_input("ライン5（例：6）", key="line_5", max_chars=9)
+line_6 = st.text_input("ライン6（任意）", key="line_6", max_chars=9)
+line_7 = st.text_input("ライン7（任意）", key="line_7", max_chars=9)
+line_8 = st.text_input("ライン8（任意）", key="line_8", max_chars=9)
+line_9 = st.text_input("ライン9（任意）", key="line_9", max_chars=9)
 
 
 
@@ -240,7 +242,7 @@ def extract_car_list(input_data):
 
 def build_line_position_map():
     result = {}
-    for line, name in zip([a_line, b_line, c_line, d_line, e_line, f_line, g_line], ['A', 'B', 'C', 'D', 'E', 'F', 'G']):
+    for line, name in zip([a_line, b_line, c_line, d_line, e_line, f_line, g_line, h_line, i_line], ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I']):
         cars = extract_car_list(line)
         for i, car in enumerate(cars):
             if name == 'S':
@@ -267,8 +269,8 @@ if st.button("スコア計算実行"):
         df = pd.DataFrame({"得点": tenscore_list})
         df["順位"] = df["得点"].rank(ascending=False, method="min").astype(int)
     
-        # 基準点：2〜6位の平均
-        baseline = df[df["順位"].between(2, 6)]["得点"].mean()
+        # 基準点：2〜8位の平均
+        baseline = df[df["順位"].between(2, 8)]["得点"].mean()
     
         # 2〜4位だけ補正（差分の3％、必ず正の加点）
         def apply_targeted_correction(row):
@@ -375,9 +377,9 @@ def compute_group_bonus(score_parts, line_def):
 
     # 順位に応じてボーナス値を割当
     bonus_map = {
-        group: [0.25, 0.2, 0.15, 0.1, 0.05, 0.03, 0.01][idx]
+        group: [0.25, 0.2, 0.15, 0.1, 0.08, 0.05, 0.03, 0.02, 0.01][idx]
         for idx, (group, _) in enumerate(sorted_lines)
-        if idx < 7
+        if idx < 9
     }
 
     return bonus_map
@@ -385,7 +387,7 @@ def compute_group_bonus(score_parts, line_def):
 
 
     def get_group_bonus(car_no, line_def, group_bonus_map):
-        for group in ['A', 'B', 'C', 'D', 'E', 'F', 'G']:
+        for group in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I']:
             if car_no in line_def[group]:
                 base_bonus = group_bonus_map.get(group, 0.0)
                 s_bonus = 0.15 if group == 'A' else 0.0  # ← 無条件でAだけに+0.15
@@ -396,7 +398,7 @@ def compute_group_bonus(score_parts, line_def):
 
 # --- ライン構成取得（最大7ライン。単騎含む。自由入力） ---
 lines = []
-for i in range(1, 8):
+for i in range(1, 10):
     input_value = st.session_state.get(f"line_{i}", "")
     if input_value.strip():
         lines.append(extract_car_list(input_value))
@@ -410,7 +412,7 @@ def build_line_position_map(lines):
     return line_order_map
 
 line_order_map = build_line_position_map(lines)
-line_order = [line_order_map.get(i + 1, 0) for i in range(7)]
+line_order = [line_order_map.get(i + 1, 0) for i in range(9)]
 
 
 # --- グループ補正関数（line_defに基づきボーナスマップを作成） ---
@@ -427,7 +429,7 @@ def compute_group_bonus(score_parts, line_def):
                 break
 
     sorted_lines = sorted(group_scores.items(), key=lambda x: x[1], reverse=True)
-    bonus_values = [0.25, 0.2, 0.15, 0.1, 0.05, 0.03, 0.01]
+    bonus_values = [0.25, 0.2, 0.15, 0.1, 0.08, 0.05, 0.03, 0.02, 0.01]
     bonus_map = {
         group: bonus_values[idx] if idx < len(bonus_values) else 0.0
         for idx, (group, _) in enumerate(sorted_lines)
@@ -467,7 +469,7 @@ def score_from_tenscore_list(tenscore_list):
 tenscore_score = score_from_tenscore_list(rating)
 score_parts = []
 
-for i in range(7):
+for i in range(9):
     if not tairetsu[i].isdigit():
         continue
 
@@ -523,7 +525,8 @@ def compute_group_bonus(score_parts, line_def):
 
     # 順位を決定（合計スコアベース）
     sorted_lines = sorted(group_scores.items(), key=lambda x: x[1], reverse=True)
-    bonus_values = [0.25, 0.2, 0.15, 0.1, 0.05, 0.03, 0.01]
+    bonus_values = [0.25, 0.2, 0.15, 0.1, 0.08, 0.05, 0.03, 0.02, 0.01]
+
     bonus_map = {
         group: bonus_values[idx] if idx < len(bonus_values) else 0.0
         for idx, (group, _) in enumerate(sorted_lines)
@@ -539,7 +542,7 @@ def get_group_bonus(car_no, line_def, bonus_map):
     return 0.0  # 所属なし
 
 # --- line_def 構築（空行除外） ---
-labels = ["A", "B", "C", "D", "E", "F", "G"]
+labels = ["A", "B", "C", "D", "E", "F", "G", "H", "I"]
 line_def = {}
 for idx, line in enumerate(lines):
     if line:  # 空欄チェック
@@ -574,7 +577,7 @@ except NameError:
     st.stop()
     
 
-import pandas as pd 
+import pandas as pd
 import itertools
 import streamlit as st
 
@@ -607,10 +610,10 @@ anchor_candidates = [d for d in score_df if d["得点順位"] in [2, 3, 4]]
 anchor = sorted(anchor_candidates, key=lambda x: x["スコア"])[1]
 anchor_no = anchor["車番"]
 
-# 対抗ライン1位、漁夫ライン1位、ヒモ③（得点1位）を候補に
-# ※ライン情報は別途。ここでは仮に車番で指定（例: 5, 6, 1）
-taikou = 5  # 対抗ライン
-gyofu = 6   # 漁夫の利ライン
+# 対抗ライン1位、漁夫ライン1位、ヒモ③（得点1位 or ◎ライン内得点1位）
+# ※ライン情報は別途取得する必要あり。仮に車番で指定
+taikou = 5  # 対抗ライン代表
+gyofu = 6   # 漁夫ライン代表
 himo3_raw = 1  # 得点1位 or ◎のライン内得点1位
 
 # スコア上位2車を2列目に
@@ -622,8 +625,8 @@ second_nos = [d["車番"] for d in second_row]
 # 残りを3列目候補に
 third_base = list(set(candidate_ids) - set(second_nos))
 
-# ヒモ①②：得点5〜7位からスコア上位2車
-low_rank = [d for d in score_df if d["得点順位"] in [5, 6, 7]]
+# ヒモ①②：得点5〜9位からスコア上位2車
+low_rank = [d for d in score_df if d["得点順位"] in [5, 6, 7, 8, 9]]
 low_sorted = sorted(low_rank, key=lambda x: x["スコア"], reverse=True)[:2]
 himo_1 = low_sorted[0]["車番"]
 himo_2 = low_sorted[1]["車番"]
@@ -642,7 +645,7 @@ for a, b in itertools.combinations(himo_list, 2):
     bets.add(combo)
 
 # --- 表示 ---
-st.markdown("### 🌟 三連複構成（ハイブリッド）")
+st.markdown("### 🌟 三連複構成（9車ハイブリッド）")
 st.markdown(f"◎：{anchor_no}")
 st.markdown(f"2列目（スコア上位）：{second_nos}")
 st.markdown(f"3列目候補：{sorted(himo_list)}")
