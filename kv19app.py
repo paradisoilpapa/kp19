@@ -605,14 +605,11 @@ score_df = [
     for _, row in df.iterrows()
 ]
 
-# ◎：競争得点2〜4位からスコア中位を選出
+# ◎：競争得点2〜4位の中で、スコア最大の1車
 anchor_candidates = [d for d in score_df if d["得点順位"] in [2, 3, 4]]
-if len(anchor_candidates) < 3:
-    st.error("◎候補が3車未満です。スコア中位が選べません。")
-    st.stop()
-anchor_sorted = sorted(anchor_candidates, key=lambda x: x["スコア"])
-anchor = anchor_sorted[1]  # 中位
+anchor = max(anchor_candidates, key=lambda x: x["スコア"])
 anchor_no = anchor["車番"]
+
 
 # 対抗ライン1位、漁夫ライン1位、ヒモ③（得点1位 or ◎ライン内得点1位）を仮置き
 # ※ライン情報は別途取得必須
