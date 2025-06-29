@@ -608,32 +608,41 @@ score_df = [
 # ◎（軸）：競争得点2〜4位の中からスコア中位（2番目）
 anchor_candidates = [d for d in score_df if d["得点順位"] in [2, 3, 4]]
 anchor = sorted(anchor_candidates, key=lambda x: x["スコア"])[1]
-anchor_no = anchor["車番"]
+anchor_no = anchor["車番"]-
 
 # --- ライン構成前提（lines）と anchor_no（◎の車番）は定義済み ---
 
-# 対抗ライン（Bライン）
-taikou_leader = None
-if len(lines) > 1 and lines[1]:
-    b_line_scores = [d for d in score_df if d["車番"] in lines[1]]
-    if b_line_scores:
-        taikou_leader = max(b_line_scores, key=lambda x: x["スコア"])["車番"]
+# ◎のライン（Aライン）
+a_line = next((line for line in lines if anchor_no in line), [])
 
-# 漁夫の利ライン（Cライン）
-gyofu_leader = None
-if len(lines) > 2 and lines[2]:
-    c_line_scores = [d for d in score_df if d["車番"] in lines[2]]
-    if c_line_scores:
-        gyofu_leader = max(c_line_scores, key=lambda x: x["スコア"])["車番"]
+# 残りのライン（非空）を取得
+other_lines = [line for line in lines if line != a_line and len(line) > 0]
 
-# ◎のライン
-anchor_line = [line for line in lines if anchor_no in line]
-anchor_line_members = anchor_line[0] if anchor_line else []
+# 各ラインのスコア合計を算出し、対抗ライン（B）・漁夫の利ライン（C）を決定
+line_scores = []
+for line in other_lines:
+    members = [d for d in score_df if d["車番"] in line]
+    line_score_sum = sum([m["スコア"] for m in members])
+    line_scores.append((line, line_score_sum))
+
+sorted_lines = sorted(line_scores, key=lambda x: x[1], reverse=True)
+b_line = sorted_lines[0][0] if len(sorted_lines) > 0 else []
+c_line = sorted_lines[1][0] if len(sorted_lines) > 1 else []
+
+# 各ラインの1番手を取得
+b_line_scores = [d for d in score_df if d["車番"] in b_line]
+taikou_leader = max(b_line_scores, key=lambda x: x["スコア"])["車番"] if b_line_scores else None
+
+c_line_scores = [d for d in score_df if d["車番"] in c_line]
+gyofu_leader = max(c_line_scores, key=lambda x: x["スコア"])["車番"] if c_line_scores else None
+
+# Aライン構成メンバー
+anchor_line_members = a_line
 
 # 得点1位を取得
 tenscore_top = min(score_df, key=lambda x: x["得点順位"])
 
-# ヒモ③候補
+# ヒモ③候補（得点1位 or ◎のライン内得点1位）
 d = score_df
 if len(anchor_line_members) <= 1:
     himo3 = tenscore_top["車番"]
