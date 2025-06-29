@@ -615,16 +615,17 @@ anchor_no = anchor["車番"]
 # ◎のライン（Aライン）
 a_line = next((line for line in lines if anchor_no in line), [])
 
-# 残りのライン（非空）を取得
+# 他のすべてのライン（空でない全て、単騎も含む）
 other_lines = [line for line in lines if line != a_line and len(line) > 0]
 
-# 各ラインのスコア合計を算出し、対抗ライン（B）・漁夫の利ライン（C）を決定
+# 各ラインのスコア合計を算出（単騎も対象）
 line_scores = []
 for line in other_lines:
     members = [d for d in score_df if d["車番"] in line]
     line_score_sum = sum([m["スコア"] for m in members])
     line_scores.append((line, line_score_sum))
 
+# スコア合計の高い順に、Bライン・Cラインとする
 sorted_lines = sorted(line_scores, key=lambda x: x[1], reverse=True)
 b_line = sorted_lines[0][0] if len(sorted_lines) > 0 else []
 c_line = sorted_lines[1][0] if len(sorted_lines) > 1 else []
