@@ -612,20 +612,20 @@ anchor_no = anchor["車番"]
 
 # --- ライン構成前提（lines）と anchor_no（◎の車番）は定義済み ---
 
-# ◎のライン（Aライン）
+# --- Aライン（◎が含まれるライン） ---
 a_line = next((line for line in lines if anchor_no in line), [])
+a_line_id = lines.index(a_line) if a_line in lines else -1
 
-# 他のすべてのライン（空でない全て、単騎も含む）
-other_lines = [line for line in lines if line != a_line and len(line) > 0]
+# --- A以外のライン（空でないものを対象） ---
+other_lines = [line for idx, line in enumerate(lines) if idx != a_line_id and len(line) > 0]
 
-# 各ラインのスコア合計を算出（単騎も対象）
+# --- B・Cラインをスコア合計で選出 ---
 line_scores = []
 for line in other_lines:
     members = [d for d in score_df if d["車番"] in line]
     line_score_sum = sum([m["スコア"] for m in members])
     line_scores.append((line, line_score_sum))
 
-# スコア合計の高い順に、Bライン・Cラインとする
 sorted_lines = sorted(line_scores, key=lambda x: x[1], reverse=True)
 b_line = sorted_lines[0][0] if len(sorted_lines) > 0 else []
 c_line = sorted_lines[1][0] if len(sorted_lines) > 1 else []
