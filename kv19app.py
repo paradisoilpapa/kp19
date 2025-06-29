@@ -617,7 +617,8 @@ a_line = next((line for line in lines if anchor_no in line), [])
 a_line_id = lines.index(a_line) if a_line in lines else -1
 
 # --- A以外のライン（空でないものを対象） ---
-other_lines = [line for idx, line in enumerate(lines) if idx != a_line_id and len(line) > 0]
+other_lines = [line for idx, line in enumerate(lines) if idx != a_line_id and len(line) >= 1]
+
 
 # --- B・Cラインをスコア合計で選出 ---
 line_scores = []
