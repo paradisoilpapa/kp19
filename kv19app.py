@@ -701,7 +701,7 @@ for a, b in itertools.combinations(himo_list, 2):
     bets.add(combo)
 
 # --- 表示 ---
-st.markdown("### 三連複構成（ハイブリッド）")
+st.markdown("### 三連複構成")
 st.markdown(f"◎：{anchor_no}")
 st.markdown(f"2列目（スコア上位）：{second_nos}")
 st.markdown(f"3列目候補：{sorted(himo_list)}")
