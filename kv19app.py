@@ -4,7 +4,7 @@ import pandas as pd
 # --- ページ設定 ---
 st.set_page_config(page_title="ライン競輪スコア計算（完全統一版）", layout="wide")
 
-st.title("⭐ ライン競輪スコア計算（9車ライン＋欠番対応）⭐")
+st.title("⭐ ライン競輪スコア計算（9車ライン KP19ver）⭐")
 
 # --- 風向補正係数 ---
 wind_coefficients = {
