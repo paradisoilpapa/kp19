@@ -605,9 +605,9 @@ score_df = [
     for _, row in df.iterrows()
 ]
 
-# ◎（軸）：競争得点2〜4位の中からスコア中位（2番目）
-anchor_candidates = [d for d in score_df if d["得点順位"] in [2, 3, 4]]
-anchor = sorted(anchor_candidates, key=lambda x: x["スコア"])[1]
+# ◎（軸）：競争得点2〜5位の中でスコアが最も高い車
+anchor_candidates = [d for d in score_df if d["得点順位"] in [2, 3, 4, 5]]
+anchor = max(anchor_candidates, key=lambda x: x["スコア"])
 anchor_no = anchor["車番"]
 
 # --- ライン構成前提（lines）と anchor_no（◎の車番）は定義済み ---
