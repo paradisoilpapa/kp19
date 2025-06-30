@@ -668,8 +668,8 @@ low_sorted = sorted(low_rank, key=lambda x: x["スコア"], reverse=True)[:2]
 himo_1 = low_sorted[0]["車番"]
 himo_2 = low_sorted[1]["車番"]
 
-# --- ヒモ④：得点2〜4位から◎を除くスコア上位1車 ---
-up_candidates = [d for d in score_df if d["得点順位"] in [2, 3, 4] and d["車番"] != anchor_no]
+# --- ヒモ④：得点1〜4位から◎を除くスコア上位1車 ---
+up_candidates = [d for d in score_df if d["得点順位"] in [1, 2, 3, 4] and d["車番"] != anchor_no]
 himo_4 = max(up_candidates, key=lambda x: x["スコア"])["車番"]
 
 # --- 3列目構成 ---
