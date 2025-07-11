@@ -28,7 +28,7 @@ position_multipliers = {
 }
 
 # --- 基本スコア（脚質ごとの基準値） ---
-base_score = {'逃': 4.72, '両': 5.05, '追': 5.23}
+base_score = {'逃': 1.543, '両': 1.613, '追': 1.843}
 
 # --- 状態保持 ---
 if "selected_wind" not in st.session_state:
