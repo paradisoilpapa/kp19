@@ -11,6 +11,7 @@ Velobi-K β（地方競馬スコア計算：NAR＋ばんえい対応）
 
 st.set_page_config(page_title="Velobi-K β（地方競馬/NAR＋ばんえい）", layout="wide")
 st.title("🏇 Velobi-K β（地方競馬スコア計算：NAR＋ばんえい対応）")
+st.caption("5〜12頭・NAR全場＋帯広（ばんえい）をこの1本で処理（欠頭数OK）")
 
 # =========================================
 # 設定
@@ -53,6 +54,30 @@ SURFACE_STATES = ["良", "稍重", "重", "不良"]
 PACE_SCENARIOS = ["前傾", "平均", "後傾"]  # 平地のみ使用
 RUN_STYLES = ["逃", "先", "差", "追"]      # 平地のみ使用
 
+# --- UI安全化ヘルパ（表記ゆれ対応） ---
+_course_opts = ["右","左","直"]
+_course_alias = {
+    "右回り":"右", "右外":"右",
+    "左回り":"左",
+    "直線":"直", "直":"直",
+    "right":"右", "left":"左", "straight":"直"
+}
+_surface_opts = ["ダート","芝"]
+_surface_alias = {
+    "砂":"ダート", "DIRT":"ダート",
+    "TURF":"芝"
+}
+
+def safe_selectbox(label, options, value, aliases=None, default=0, key=None):
+    v = str(value)
+    if aliases:
+        v = aliases.get(v, v)
+    try:
+        idx = options.index(v)
+    except ValueError:
+        idx = default
+    return st.selectbox(label, options, index=idx, key=key)
+
 # =========================================
 # UI：コース/馬場/モード
 # =========================================
@@ -62,7 +87,7 @@ with colA:
     info = TRACKS[track]
 with colB:
     # 自動：帯広を選ぶとばんえいモード推奨
-    auto_is_banei = ("ばんえい" in track or info.get("course")=="直線" and info.get("turns",2)==0)
+    auto_is_banei = ("ばんえい" in track or (_course_alias.get(info.get("course","右"), info.get("course","右")) == "直" and info.get("turns",2)==0))
     mode = st.radio("モード", ["平地(サラ)", "ばんえい"], index=1 if auto_is_banei else 0, horizontal=True)
 with colC:
     surface_state = st.selectbox("馬場状態", SURFACE_STATES, index=0)
@@ -77,9 +102,9 @@ with colE:
 # 共通コース諸元（手入力上書き可）
 col1, col2, col3 = st.columns(3)
 with col1:
-    surface = st.selectbox("コース種別", ["ダート","芝"], index=0 if info["surface"]=="ダート" else 1)
+    surface = safe_selectbox("コース種別", _surface_opts, info.get("surface","ダート"), aliases=_surface_alias)
 with col2:
-    course_dir = st.selectbox("回り", ["右","左","直"], index=["右","左","直"].index(info["course"]))
+    course_dir = safe_selectbox("回り", _course_opts, info.get("course","右"), aliases=_course_alias)
 with col3:
     circle = st.number_input("1周距離[m]", min_value=200, max_value=2200, step=50, value=int(info["circle"]))
 
@@ -259,5 +284,3 @@ if rows2:
     st.dataframe(df.sort_values(by="合計スコア", ascending=False).reset_index(drop=True))
 else:
     st.info("出走フラグが未入力です。数字を入れると計算します。")
-
-
