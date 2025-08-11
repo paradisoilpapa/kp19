@@ -1,725 +1,263 @@
 import streamlit as st
 import pandas as pd
 
-# --- ページ設定 ---
-st.set_page_config(page_title="ライン競輪スコア計算（完全統一版）", layout="wide")
+"""
+Velobi-K β（地方競馬スコア計算：NAR＋ばんえい対応）
+- 5〜12頭対応（欠頭数OK）
+- NAR公式コース情報をプリセット（帯広ばんえい含む）
+- モード切替：平地（サラ） / ばんえい（帯広）
+- 目的：まず“ひな形”として一括運用できる骨組みを提供（係数は後でチューニング）
+"""
 
-st.title("⭐ ライン競輪スコア計算（9車ライン KP19ver）⭐")
+st.set_page_config(page_title="Velobi-K β（地方競馬/NAR＋ばんえい）", layout="wide")
+st.title("🏇 Velobi-K β（地方競馬スコア計算：NAR＋ばんえい対応）")
 
-# --- 風向補正係数 ---
-wind_coefficients = {
-    "左上": -0.03,
-    "上":   -0.05,
-    "右上": -0.035,
-    "左":   +0.05,
-    "右":   -0.05,
-    "左下": +0.035,
-    "下":   +0.05,
-    "右下": +0.035
+# =========================================
+# 設定
+# =========================================
+N_MAX = 12
+
+# --- 競馬場プリセット（NAR公式ベース：直線は“ゴールまで”の長さ） ---
+TRACKS = {
+    # ばんえい
+    "帯広(ばんえい)": {"surface":"ダート","course":"直線","circle":200,"stretch":200,"turns":0,
+                 "obstacle1_m":1.0,"obstacle2_m":1.6},
+
+    # ホッカイドウ・岩手
+    "門別":  {"surface":"ダート","course":"右","circle":1600,"stretch":330,"turns":2},
+    "盛岡":  {"surface":"ダート","course":"左","circle":1600,"stretch":300,"turns":2},
+    "水沢":  {"surface":"ダート","course":"右","circle":1200,"stretch":245,"turns":2},
+
+    # 南関東
+    "浦和":  {"surface":"ダート","course":"左","circle":1200,"stretch":220,"turns":2},
+    "船橋":  {"surface":"ダート","course":"左","circle":1400,"stretch":308,"turns":2},
+    "大井":  {"surface":"ダート","course":"右","circle":1600,"stretch":386,"turns":2},
+    "川崎":  {"surface":"ダート","course":"左","circle":1200,"stretch":300,"turns":2},
+
+    # 北陸・東海・近畿
+    "金沢":  {"surface":"ダート","course":"右","circle":1200,"stretch":236,"turns":2},
+    "笠松":  {"surface":"ダート","course":"右","circle":1100,"stretch":201,"turns":2},
+    "名古屋":{"surface":"ダート","course":"右","circle":1180,"stretch":240,"turns":2},
+    "園田":  {"surface":"ダート","course":"右","circle":1051,"stretch":213,"turns":2},
+    "姫路":  {"surface":"ダート","course":"右","circle":1200,"stretch":230,"turns":2},
+
+    # 四国・九州
+    "高知":  {"surface":"ダート","course":"右","circle":1100,"stretch":200,"turns":2},
+    "佐賀":  {"surface":"ダート","course":"右","circle":1100,"stretch":200,"turns":2},
+
+    # 手入力
+    "手入力": {"surface":"ダート","course":"右","circle":1400,"stretch":300,"turns":2}
 }
 
-# --- ライン順による影響倍率（先頭〜4番手、単騎） ---
-position_multipliers = {
-    0: 0.3,   # 単騎
-    1: 0.32,  # 先頭
-    2: 0.3,
-    3: 0.25,
-    4: 0.2
-}
-
-# --- 基本スコア（脚質ごとの基準値） ---
-base_score = {'逃': 1.564, '両': 1.603, '追': 1.834}
-
-# --- 状態保持 ---
-if "selected_wind" not in st.session_state:
-    st.session_state.selected_wind = "無風"
-
-# --- 風＋ライン順に応じた補正スコア関数 ---
-def wind_straight_combo_adjust(kakushitsu, wind_direction, wind_speed, straight_length, line_order):
-    wind_adj = wind_coefficients.get(wind_direction, 0.0)
-    pos_multi = position_multipliers.get(line_order, 0.3)
-
-    if wind_direction == "無風" or wind_speed == 0:
-        return 0.0
-
-    if kakushitsu == "逃":
-        return round(wind_speed * wind_adj * 1.0 * pos_multi, 3)
-    elif kakushitsu == "両":
-        return round(wind_speed * wind_adj * 0.7 * pos_multi, 3)
-    elif kakushitsu == "追":
-        return round(wind_speed * wind_adj * 0.4 * pos_multi, 3)
-    return round(wind_speed * wind_adj * 0.5 * pos_multi, 3)
-
-# --- バンク・風条件セクション ---
-st.header("【バンク・風条件】")
-
-cols_top = st.columns(3)
-cols_mid = st.columns(3)
-cols_bot = st.columns(3)
-
-with cols_top[0]:
-    if st.button("左上"):
-        st.session_state.selected_wind = "左上"
-with cols_top[1]:
-    if st.button("上"):
-        st.session_state.selected_wind = "上"
-with cols_top[2]:
-    if st.button("右上"):
-        st.session_state.selected_wind = "右上"
-with cols_mid[0]:
-    if st.button("左"):
-        st.session_state.selected_wind = "左"
-with cols_mid[1]:
-    st.markdown("""
-    <div style='text-align:center; font-size:16px; line-height:1.6em;'>
-        ↑<br>［上］<br>
-        ← 左　　　右 →<br>
-        ［下］<br>↓<br>
-        □ ホーム→（ ゴール）
-    </div>
-    """, unsafe_allow_html=True)
-with cols_mid[2]:
-    if st.button("右"):
-        st.session_state.selected_wind = "右"
-with cols_bot[0]:
-    if st.button("左下"):
-        st.session_state.selected_wind = "左下"
-with cols_bot[1]:
-    if st.button("下"):
-        st.session_state.selected_wind = "下"
-with cols_bot[2]:
-    if st.button("右下"):
-        st.session_state.selected_wind = "右下"
-
-st.subheader(f"✅ 選択中の風向き：{st.session_state.selected_wind}")
-
-
-
-# ▼ 競輪場選択による自動入力
-keirin_data = {
-    "函館": {"bank_angle": 30.6, "straight_length": 51.3, "bank_length": 400},
-    "青森": {"bank_angle": 32.3, "straight_length": 58.9, "bank_length": 400},
-    "いわき平": {"bank_angle": 32.9, "straight_length": 62.7, "bank_length": 400},
-    "弥彦": {"bank_angle": 32.4, "straight_length": 63.1, "bank_length": 400},
-    "前橋": {"bank_angle": 36.0, "straight_length": 46.7, "bank_length": 335},
-    "取手": {"bank_angle": 31.5, "straight_length": 54.8, "bank_length": 400},
-    "宇都宮": {"bank_angle": 25.8, "straight_length": 63.3, "bank_length": 500},
-    "大宮": {"bank_angle": 26.3, "straight_length": 66.7, "bank_length": 500},
-    "西武園": {"bank_angle": 29.4, "straight_length": 47.6, "bank_length": 400},
-    "京王閣": {"bank_angle": 32.2, "straight_length": 51.5, "bank_length": 400},
-    "立川": {"bank_angle": 31.2, "straight_length": 58.0, "bank_length": 400},
-    "松戸": {"bank_angle": 29.8, "straight_length": 38.2, "bank_length": 333},
-    "川崎": {"bank_angle": 32.2, "straight_length": 58.0, "bank_length": 400},
-    "平塚": {"bank_angle": 31.5, "straight_length": 54.2, "bank_length": 400},
-    "小田原": {"bank_angle": 35.6, "straight_length": 36.1, "bank_length": 333},
-    "伊東": {"bank_angle": 34.7, "straight_length": 46.6, "bank_length": 333},
-    "静岡": {"bank_angle": 30.7, "straight_length": 56.4, "bank_length": 400},
-    "名古屋": {"bank_angle": 34.0, "straight_length": 58.8, "bank_length": 400},
-    "岐阜": {"bank_angle": 32.3, "straight_length": 59.3, "bank_length": 400},
-    "大垣": {"bank_angle": 30.6, "straight_length": 56.0, "bank_length": 400},
-    "豊橋": {"bank_angle": 33.8, "straight_length": 60.3, "bank_length": 400},
-    "富山": {"bank_angle": 33.7, "straight_length": 43.0, "bank_length": 333},
-    "松坂": {"bank_angle": 34.4, "straight_length": 61.5, "bank_length": 400},
-    "四日市": {"bank_angle": 32.3, "straight_length": 62.4, "bank_length": 400},
-    "福井": {"bank_angle": 31.5, "straight_length": 52.8, "bank_length": 400},
-    "奈良": {"bank_angle": 33.4, "straight_length": 38.0, "bank_length": 333},
-    "向日町": {"bank_angle": 30.5, "straight_length": 47.3, "bank_length": 400},
-    "和歌山": {"bank_angle": 32.3, "straight_length": 59.9, "bank_length": 400},
-    "岸和田": {"bank_angle": 30.9, "straight_length": 56.7, "bank_length": 400},
-    "玉野": {"bank_angle": 30.6, "straight_length": 47.9, "bank_length": 400},
-    "広島": {"bank_angle": 30.8, "straight_length": 57.9, "bank_length": 400},
-    "防府": {"bank_angle": 34.7, "straight_length": 42.5, "bank_length": 333},
-    "高松": {"bank_angle": 33.3, "straight_length": 54.8, "bank_length": 400},
-    "小松島": {"bank_angle": 29.8, "straight_length": 55.5, "bank_length": 400},
-    "高知": {"bank_angle": 24.5, "straight_length": 52.0, "bank_length": 500},
-    "松山": {"bank_angle": 34.0, "straight_length": 58.6, "bank_length": 400},
-    "小倉": {"bank_angle": 34.0, "straight_length": 56.9, "bank_length": 400},
-    "久留米": {"bank_angle": 31.5, "straight_length": 50.7, "bank_length": 400},
-    "武雄": {"bank_angle": 32.0, "straight_length": 64.4, "bank_length": 400},
-    "佐世保": {"bank_angle": 31.5, "straight_length": 40.2, "bank_length": 400},
-    "別府": {"bank_angle": 33.7, "straight_length": 59.9, "bank_length": 400},
-    "熊本": {"bank_angle": 34.3, "straight_length": 60.3, "bank_length": 400},
-    "手入力": {"bank_angle": 30.0, "straight_length": 52.0, "bank_length": 400}
-}
-
-
-selected_track = st.selectbox("▼ 競輪場選択（自動入力）", list(keirin_data.keys()))
-selected_info = keirin_data[selected_track]
-
-# ▼ 風速入力（手動）
-wind_speed = st.number_input("風速(m/s)", min_value=0.0, max_value=30.0, step=0.1, value=3.0)
-
-# ▼ 自動反映される直線長さ・バンク角・周長
-straight_length = st.number_input("みなし直線(m)", min_value=30.0, max_value=80.0, step=0.05,
-                                  value=float(selected_info["straight_length"]))
-
-bank_angle = st.number_input("バンク角(°)", min_value=20.0, max_value=45.0, step=0.05,
-                             value=float(selected_info["bank_angle"]))
-
-bank_length = st.number_input("バンク周長(m)", min_value=300.0, max_value=500.0, step=0.05,
-                              value=float(selected_info["bank_length"]))
-
-
-# ▼ 周回数の入力（通常は4、高松などは5）
-laps = st.number_input("周回数（通常は4、高松などは5）", min_value=1, max_value=10, value=4, step=1)
-
-# --- 【選手データ入力】 ---
-st.header("【選手データ入力】")
-
-st.subheader("▼ 位置入力（逃＝先頭・両＝番手・追＝３番手以降&単騎：車番を半角数字で入力）")
-
-kakushitsu_keys = ['逃', '両', '追']
-kakushitsu_inputs = {}
-cols = st.columns(3)
-for i, k in enumerate(kakushitsu_keys):
-    with cols[i]:
-        st.markdown(f"**{k}**")
-        kakushitsu_inputs[k] = st.text_input("", key=f"kaku_{k}", max_chars=14)
-
-# 車番 → 脚質の辞書を構築
-car_to_kakushitsu = {}
-for k, val in kakushitsu_inputs.items():
-    for c in val:
-        if c.isdigit():
-            n = int(c)
-            if 1 <= n <= 9:
-                car_to_kakushitsu[n] = k
-
-st.subheader("▼ 前々走・前走の着順入力（1〜9着 または 0＝落車）")
-
-# 7選手 × 2走分
-chaku_inputs = []  # [[前々走, 前走], ..., [前々走, 前走]]
-
-for i in range(9):
-    col1, col2 = st.columns(2)
-    with col1:
-        chaku1 = st.text_input(f"{i+1}番【前々走】", value="", key=f"chaku1_{i}")
-    with col2:
-        chaku2 = st.text_input(f"{i+1}番【前走】", value="", key=f"chaku2_{i}")
-    chaku_inputs.append([chaku1, chaku2])
-
-
-
-st.subheader("▼ 競争得点入力")
-rating = [st.number_input(f"{i+1}番得点", value=55.0, step=0.1, key=f"rate_{i}") for i in range(9)]
-
-st.subheader("▼ 予想隊列入力（数字、欠の場合は空欄）")
-tairetsu = [st.text_input(f"{i+1}番隊列順位", key=f"tai_{i}") for i in range(9)]
-
-
-# --- S・B 入力（回数を数値で入力） ---
-st.subheader("▼ S・B 入力（各選手のS・B回数を入力）")
-
-for i in range(9):
-    st.markdown(f"**{i+1}番**")
-    s_val = st.number_input("S回数", min_value=0, max_value=99, value=0, step=1, key=f"s_point_{i+1}")
-    b_val = st.number_input("B回数", min_value=0, max_value=99, value=0, step=1, key=f"b_point_{i+1}")
-
-
-# --- ライン構成入力（最大9ライン、単騎含む自由構成） ---
-st.subheader("▼ ライン構成入力（最大9ライン：単騎も1ラインとして扱う）")
-
-line_1 = st.text_input("ライン1（例：4）", key="line_1", max_chars=9)
-line_2 = st.text_input("ライン2（例：12）", key="line_2", max_chars=9)
-line_3 = st.text_input("ライン3（例：35）", key="line_3", max_chars=9)
-line_4 = st.text_input("ライン4（例：7）", key="line_4", max_chars=9)
-line_5 = st.text_input("ライン5（例：6）", key="line_5", max_chars=9)
-line_6 = st.text_input("ライン6（任意）", key="line_6", max_chars=9)
-line_7 = st.text_input("ライン7（任意）", key="line_7", max_chars=9)
-line_8 = st.text_input("ライン8（任意）", key="line_8", max_chars=9)
-line_9 = st.text_input("ライン9（任意）", key="line_9", max_chars=9)
-
-
-
-# --- ライン構成入力に必要な補助関数 ---
-def extract_car_list(input_data):
-    if isinstance(input_data, str):
-        return [int(c) for c in input_data if c.isdigit()]
-    elif isinstance(input_data, list):
-        return [int(c) for c in input_data if isinstance(c, (str, int)) and str(c).isdigit()]
-    else:
-        return []
-
-def build_line_position_map():
-    result = {}
-    for line, name in zip([a_line, b_line, c_line, d_line, e_line, f_line, g_line, h_line, i_line], ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I']):
-        cars = extract_car_list(line)
-        for i, car in enumerate(cars):
-            if name == 'S':
-                result[car] = 0
-            else:
-                result[car] = i + 1
-    return result
-
-# --- スコア計算ボタン表示 ---
-st.subheader("▼ スコア計算")
-if st.button("スコア計算実行"):
-
-    def extract_car_list(input_data):
-        if isinstance(input_data, str):
-            return [int(c) for c in input_data if c.isdigit()]
-        elif isinstance(input_data, list):
-            return [int(c) for c in input_data if isinstance(c, (str, int)) and str(c).isdigit()]
-        else:
-            return []
-
-    def score_from_tenscore_list(tenscore_list):
-        import pandas as pd
-    
-        df = pd.DataFrame({"得点": tenscore_list})
-        df["順位"] = df["得点"].rank(ascending=False, method="min").astype(int)
-    
-        # 基準点：2〜8位の平均
-        baseline = df[df["順位"].between(2, 8)]["得点"].mean()
-    
-        # 2〜4位だけ補正（差分の3％、必ず正の加点）
-        def apply_targeted_correction(row):
-            if row["順位"] in [2, 3, 4]:
-                correction = abs(baseline - row["得点"]) * 0.03
-                return round(correction, 3)
-            else:
-                return 0.0
-
-        df["最終補正値"] = df.apply(apply_targeted_correction, axis=1)
-        return df["最終補正値"].tolist()
-
-
-
-    def wind_straight_combo_adjust(kaku, direction, speed, straight, pos):
-        if direction == "無風" or speed < 0.5:
-            return 0
-    
-        base = wind_coefficients.get(direction, 0.0)  # e.g. 上=+0.005
-        pos_mult = position_multipliers.get(pos, 0.0)  # e.g. 先頭=0.5, 番手=0.3
-    
-        # 強化された脚質補正係数（±1.0スケールに）
-        kaku_coeff = {
-            '逃': +0.3,
-            '両':  +0.15,
-            '追': -0.3
-        }.get(kaku, 0.0)
-    
-        total = base * speed * pos_mult * kaku_coeff  # 例: +0.1×10×1×1 = +1.0
-        return round(total, 2)
-
-
-    def convert_chaku_to_score(values):
-        scores = []
-        for i, v in enumerate(values):
-            v = v.strip()
-            try:
-                chaku = int(v)
-                if 1 <= chaku <= 9:
-                    score = (10 - chaku) / 9
-                    if i == 1:
-                        score *= 0.35
-                    scores.append(score)
-            except ValueError:
-                continue
-        if not scores:
-            return 0.0
-        return round(sum(scores) / len(scores), 2)
-
-
-
-
-
-    def lap_adjust(kaku, laps):
-        delta = max(laps - 2, 0)
-        return {
-            '逃': round(-0.1 * delta, 1),
-            '追': round(+0.05 * delta, 1),
-            '両': 0.0
-        }.get(kaku, 0.0)
-
-    def line_member_bonus(pos):
-        return {
-            0: 0.25,  # 単騎
-            1: 0.25,  # 先頭（ライン1番手）
-            2: 0.3,  # 2番手（番手）
-            3: 0.3,  # 3番手（最後尾）
-            4: 0.15   # 4番手（9車用：評価不要レベル）
-        }.get(pos, 0.0)
-
-
-    def bank_character_bonus(kaku, angle, straight):
-        """
-        カント角と直線長による脚質補正（スケール緩和済み）
-        """
-        straight_factor = (straight - 40.0) / 10.0
-        angle_factor = (angle - 25.0) / 5.0
-        total_factor = -0.1 * straight_factor + 0.1 * angle_factor
-        return round({'逃': +total_factor, '追': -total_factor, '両': +0.25 * total_factor}.get(kaku, 0.0), 2)
-        
-    def bank_length_adjust(kaku, length):
-        """
-        バンク周長による補正（400基準を完全維持しつつ、±0.15に制限）
-        """
-        delta = (length - 411) / 100
-        delta = max(min(delta, 0.075), -0.075)
-        return round({'逃': 1.0 * delta, '両': 2.0 * delta, '追': 3.0 * delta}.get(kaku, 0.0), 2)
-
-def compute_group_bonus(score_parts, line_def):
-    group_scores = {k: 0.0 for k in line_def.keys()}
-    group_counts = {k: 0 for k in line_def.keys()}
-
-    # 各ラインの合計スコアと人数を集計
-    for entry in score_parts:
-        car_no, score = entry[0], entry[-1]
-        for group in line_def:
-            if car_no in line_def[group]:
-                group_scores[group] += score
-                group_counts[group] += 1
-                break
-
-    # 合計スコアで順位を決定（平均ではなく合計）
-    sorted_lines = sorted(group_scores.items(), key=lambda x: x[1], reverse=True)
-
-    # 順位に応じてボーナス値を割当
-    bonus_map = {
-        group: [0.25, 0.2, 0.15, 0.1, 0.08, 0.05, 0.03, 0.02, 0.01][idx]
-        for idx, (group, _) in enumerate(sorted_lines)
-        if idx < 9
-    }
-
-    return bonus_map
-
-
-
-    def get_group_bonus(car_no, line_def, group_bonus_map):
-        for group in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I']:
-            if car_no in line_def[group]:
-                base_bonus = group_bonus_map.get(group, 0.0)
-                s_bonus = 0.15 if group == 'A' else 0.0  # ← 無条件でAだけに+0.15
-                return base_bonus + s_bonus
-        if '単騎' in line_def and car_no in line_def['単騎']:
-            return 0.2
-        return 0.0
-
-# --- ライン構成取得（最大7ライン。単騎含む。自由入力） ---
-lines = []
-for i in range(1, 10):
-    input_value = st.session_state.get(f"line_{i}", "")
-    if input_value.strip():
-        lines.append(extract_car_list(input_value))
-
-# --- 各車番のライン順を取得（1〜7番車） ---
-def build_line_position_map(lines):
-    line_order_map = {}
-    for idx, line in enumerate(lines):
-        for car in line:
-            line_order_map[car] = idx + 1
-    return line_order_map
-
-line_order_map = build_line_position_map(lines)
-line_order = [line_order_map.get(i + 1, 0) for i in range(9)]
-
-
-# --- グループ補正関数（line_defに基づきボーナスマップを作成） ---
-def compute_group_bonus(score_parts, line_def):
-    group_scores = {k: 0.0 for k in line_def.keys()}
-    group_counts = {k: 0 for k in line_def.keys()}
-
-    for entry in score_parts:
-        car_no, score = entry[0], entry[-1]
-        for group in line_def:
-            if car_no in line_def[group]:
-                group_scores[group] += score
-                group_counts[group] += 1
-                break
-
-    sorted_lines = sorted(group_scores.items(), key=lambda x: x[1], reverse=True)
-    bonus_values = [0.25, 0.2, 0.15, 0.1, 0.08, 0.05, 0.03, 0.02, 0.01]
-    bonus_map = {
-        group: bonus_values[idx] if idx < len(bonus_values) else 0.0
-        for idx, (group, _) in enumerate(sorted_lines)
-    }
-
-    return bonus_map
-
-# ✅ 追加：車番に対するグループ補正値の取得関数
-def get_group_bonus(car_no, line_def, bonus_map):
-    for group, members in line_def.items():
-        if car_no in members:
-            return bonus_map.get(group, 0.0)
-    return 0.0
-
-# ✅ 追加：競争得点補正値を返す関数
-def score_from_tenscore_list(tenscore_list):
-    import pandas as pd
-
-    df = pd.DataFrame({"得点": tenscore_list})
-    df["順位"] = df["得点"].rank(ascending=False, method="min").astype(int)
-
-    # 基準点：2〜6位の平均
-    baseline = df[df["順位"].between(2, 6)]["得点"].mean()
-
-    # 2〜4位だけ補正（差分の3％、必ず正の加点）
-    def apply_targeted_correction(row):
-        if row["順位"] in [2, 3, 4]:
-            correction = abs(baseline - row["得点"]) * 0.03
-            return round(correction, 3)
-        else:
-            return 0.0
-
-    df["最終補正値"] = df.apply(apply_targeted_correction, axis=1)
-    return df["最終補正値"].tolist()
-
-# --- スコア計算 ---
-tenscore_score = score_from_tenscore_list(rating)
-score_parts = []
-
-for i in range(9):
-    if not tairetsu[i].isdigit():
-        continue
-
-    num = i + 1
-    kaku = car_to_kakushitsu.get(num, "追")  # 車番→脚質
-    base = base_score.get(kaku, 0.0)         # 基本スコア取得
-
-    wind = wind_straight_combo_adjust(
-        kaku,
-        st.session_state.selected_wind,
-        wind_speed,
-        straight_length,
-        line_order[i]
-    )
-
-    chaku_values = chaku_inputs[i]
-    kasai = convert_chaku_to_score(chaku_values) or 0.0
-    rating_score = tenscore_score[i]
-    rain_corr = lap_adjust(kaku, laps)
-    s_bonus = -0.01 * st.session_state.get(f"s_point_{num}", 0)
-    b_bonus = 0.05 * st.session_state.get(f"b_point_{num}", 0)
-    symbol_score = s_bonus + b_bonus
-    line_bonus = line_member_bonus(line_order[i])
-    bank_bonus = bank_character_bonus(kaku, bank_angle, straight_length)
-    length_bonus = bank_length_adjust(kaku, bank_length)
-
-    total = base + wind + kasai + rating_score + rain_corr + symbol_score + line_bonus + bank_bonus + length_bonus
-
-    score_parts.append([
-        num, kaku, base, wind, kasai, rating_score,
-        rain_corr, symbol_score, line_bonus, bank_bonus, length_bonus, total
-    ])
-
-
-# --- グループ補正関数（line_defに基づきボーナスマップを作成） ---
-def compute_group_bonus(score_parts, line_def):
-    group_scores = {k: 0.0 for k in line_def.keys()}
-    group_counts = {k: 0 for k in line_def.keys()}
-
-    # 車番からグループを逆引き
-    car_to_group = {}
-    for group, members in line_def.items():
-        for car in members:
-            car_to_group[car] = group
-
-    # 各グループの合計スコアを計算
-    for entry in score_parts:
-        car_no, score = entry[0], entry[-1]
-        group = car_to_group.get(car_no)
-        if group:
-            group_scores[group] += score
-            group_counts[group] += 1
-
-    # 順位を決定（合計スコアベース）
-    sorted_lines = sorted(group_scores.items(), key=lambda x: x[1], reverse=True)
-    bonus_values = [0.25, 0.2, 0.15, 0.1, 0.08, 0.05, 0.03, 0.02, 0.01]
-
-    bonus_map = {
-        group: bonus_values[idx] if idx < len(bonus_values) else 0.0
-        for idx, (group, _) in enumerate(sorted_lines)
-    }
-
-    return bonus_map
-
-# --- グループ補正スコアを取得 ---
-def get_group_bonus(car_no, line_def, bonus_map):
-    for group, members in line_def.items():
-        if car_no in members:
-            return bonus_map.get(group, 0.0)
-    return 0.0  # 所属なし
-
-# --- line_def 構築（空行除外） ---
-labels = ["A", "B", "C", "D", "E", "F", "G", "H", "I"]
-line_def = {}
-for idx, line in enumerate(lines):
-    if line:  # 空欄チェック
-        line_def[labels[idx]] = line
-
-# --- グループ補正マップ作成 ---
-group_bonus_map = compute_group_bonus(score_parts, line_def)
-
-# --- グループ補正を最終スコアに反映 ---
-final_score_parts = []
-for row in score_parts:
-    group_corr = get_group_bonus(row[0], line_def, group_bonus_map)
-    new_total = row[-1] + group_corr
-    final_score_parts.append(row[:-1] + [group_corr, new_total])
-
-# --- 表示用DataFrame ---
-df = pd.DataFrame(final_score_parts, columns=[
-    '車番', '脚質', '基本', '風補正', '着順補正', '得点補正',
-    '周回補正', 'SB印補正', 'ライン補正', 'バンク補正', '周長補正',
-    'グループ補正', '合計スコア'
-])
-
-st.dataframe(df.sort_values(by='合計スコア', ascending=False).reset_index(drop=True))
-
-    
-try:
-    if not final_score_parts:
-        st.warning("スコアが計算されていません。入力や処理を確認してください。")
-        st.stop()
-except NameError:
-    st.warning("スコアデータが定義されていません。入力に問題がある可能性があります。")
-    st.stop()
-    
-
-import pandas as pd  
-import itertools
-import streamlit as st
-
-# --- 競争得点とスコアは別途取得済み前提 ---
-# rating = [...]
-# final_score_parts = [...]
-
-# --- DataFrame 構築 ---
-df = pd.DataFrame(final_score_parts, columns=[
-    '車番', '脚質', '基本', '風補正', '着順補正', '得点補正',
-    '周回補正', 'SB印補正', 'ライン補正', 'バンク補正', '周長補正',
-    'グループ補正', '合計スコア'
-])
-df['競争得点'] = rating
-df['競争得点順位'] = df['競争得点'].rank(ascending=False, method='min').astype(int)
-
-# --- score_df構築 ---
-score_df = [
-    {
-        "車番": int(row["車番"]),
-        "得点": float(row["競争得点"]),
-        "得点順位": int(row["競争得点順位"]),
-        "スコア": float(row["合計スコア"])
-    }
-    for _, row in df.iterrows()
-]
-
-# ◎（軸）：競争得点2〜5位の中でスコアが最も高い車
-anchor_candidates = [d for d in score_df if d["得点順位"] in [2, 3, 4, 5]]
-anchor = max(anchor_candidates, key=lambda x: x["スコア"])
-anchor_no = anchor["車番"]
-
-# --- ライン構成前提（lines）と anchor_no（◎の車番）は定義済み ---
-
-# --- Aライン（◎が含まれるライン） ---
-a_line = next((line for line in lines if anchor_no in line), [])
-a_line_id = lines.index(a_line) if a_line in lines else -1
-
-# --- A以外のライン（空でないものを対象） ---
-other_lines = [line for idx, line in enumerate(lines) if idx != a_line_id and len(line) >= 1]
-
-
-# --- B・Cラインをスコア合計で選出 ---
-line_scores = []
-for line in other_lines:
-    members = [d for d in score_df if d["車番"] in line]
-    line_score_sum = sum([m["スコア"] for m in members])
-    line_scores.append((line, line_score_sum))
-
-sorted_lines = sorted(line_scores, key=lambda x: x[1], reverse=True)
-b_line = sorted_lines[0][0] if len(sorted_lines) > 0 else []
-c_line = sorted_lines[1][0] if len(sorted_lines) > 1 else []
-
-# 各ラインの1番手を取得
-b_line_scores = [d for d in score_df if d["車番"] in b_line]
-taikou_leader = max(b_line_scores, key=lambda x: x["スコア"])["車番"] if b_line_scores else None
-
-c_line_scores = [d for d in score_df if d["車番"] in c_line]
-gyofu_leader = max(c_line_scores, key=lambda x: x["スコア"])["車番"] if c_line_scores else None
-
-# Aライン構成メンバー
-anchor_line_members = a_line
-
-# 得点1位を取得
-tenscore_top = min(score_df, key=lambda x: x["得点順位"])
-
-# ヒモ③候補（得点1位 or ◎のライン内得点1位）
-d = score_df
-if len(anchor_line_members) <= 1:
-    himo3 = tenscore_top["車番"]
+SURFACE_STATES = ["良", "稍重", "重", "不良"]
+PACE_SCENARIOS = ["前傾", "平均", "後傾"]  # 平地のみ使用
+RUN_STYLES = ["逃", "先", "差", "追"]      # 平地のみ使用
+
+# =========================================
+# UI：コース/馬場/モード
+# =========================================
+colA, colB, colC = st.columns([1.2,1,1])
+with colA:
+    track = st.selectbox("競馬場（NAR＋ばんえい）", list(TRACKS.keys()), index=0)
+    info = TRACKS[track]
+with colB:
+    # 自動：帯広を選ぶとばんえいモード推奨
+    auto_is_banei = ("ばんえい" in track or info.get("course")=="直線" and info.get("turns",2)==0)
+    mode = st.radio("モード", ["平地(サラ)", "ばんえい"], index=1 if auto_is_banei else 0, horizontal=True)
+with colC:
+    surface_state = st.selectbox("馬場状態", SURFACE_STATES, index=0)
+
+# 距離・ペース（平地向け。ばんえい時も距離は参考として保持）
+colD, colE = st.columns([1,1])
+with colD:
+    distance = st.number_input("距離[m]", min_value=800, max_value=2600, step=100, value=1400)
+with colE:
+    pace_scn = st.selectbox("ペース想定", PACE_SCENARIOS, index=1)
+
+# 共通コース諸元（手入力上書き可）
+col1, col2, col3 = st.columns(3)
+with col1:
+    surface = st.selectbox("コース種別", ["ダート","芝"], index=0 if info["surface"]=="ダート" else 1)
+with col2:
+    course_dir = st.selectbox("回り", ["右","左","直"], index=["右","左","直"].index(info["course"]))
+with col3:
+    circle = st.number_input("1周距離[m]", min_value=200, max_value=2200, step=50, value=int(info["circle"]))
+
+col4, col5 = st.columns(2)
+with col4:
+    stretch = st.number_input("直線長[m]（ゴールまで）", min_value=150 if mode=="平地(サラ)" else 200, max_value=500, step=10, value=int(info["stretch"]))
+with col5:
+    turns = st.number_input("コーナー数", min_value=0, max_value=4, step=1, value=int(info["turns"]))
+
+# =========================================
+# UI：馬データ
+# =========================================
+st.header("【馬データ入力】（欠頭数OK：空欄=除外）")
+
+if mode == "平地(サラ)":
+    # 脚質入力
+    style_inputs = {}
+    cols = st.columns(4)
+    for i, k in enumerate(RUN_STYLES):
+        with cols[i]:
+            st.markdown(f"**{k}**")
+            style_inputs[k] = st.text_input("", key=f"style_{k}", max_chars=24)
+    # 馬番→脚質
+    horse_style = {}
+    for k, val in style_inputs.items():
+        for c in val:
+            if c.isdigit():
+                n = int(c)
+                if 1 <= n <= N_MAX:
+                    horse_style[n] = k
 else:
-    anchor_line_scores = [x for x in d if x["車番"] in anchor_line_members]
-    himo3 = min(anchor_line_scores, key=lambda x: x["得点順位"])["車番"]
+    # ばんえい：脚質ではなく基礎能力の代理指標を入力
+    st.info("ばんえいモード：各馬の負担重量・障害対応・近走指数などを入力（簡易版）")
 
-# --- 2列目構築 ---
-raw_candidates = [taikou_leader, gyofu_leader, himo3]
-second_candidates = [x for x in raw_candidates if x is not None and x != anchor_no]
-
-candidate_scores = [d for d in score_df if d["車番"] in second_candidates]
-second_row = sorted(candidate_scores, key=lambda x: x["スコア"], reverse=True)[:2]
-second_nos = [d["車番"] for d in second_row]
-
-third_base = list(set(second_candidates) - set(second_nos))
-
-# --- ヒモ①②：得点5〜9位からスコア上位2車 ---
-low_rank = [d for d in score_df if d["得点順位"] in [5, 6, 7, 8, 9]]
-low_sorted = sorted(low_rank, key=lambda x: x["スコア"], reverse=True)[:2]
-himo_1 = low_sorted[0]["車番"]
-himo_2 = low_sorted[1]["車番"]
-
-# --- ヒモ④：得点1〜4位から◎を除くスコア上位1車 ---
-up_candidates = [d for d in score_df if d["得点順位"] in [1, 2, 3, 4] and d["車番"] != anchor_no]
-himo_4 = max(up_candidates, key=lambda x: x["スコア"])["車番"]
-
-# --- 3列目構成 ---
-temp = [himo_1, himo_2, himo_4] + third_base
-himo_list = []
-for x in temp:
-    if x not in himo_list:
-        himo_list.append(x)
-
-# --- 補完処理（3車時のみ） ---
-if len(himo_list) == 3:
-    third_base_extra = None
-    himo_candidate_extra = None
-
-    second_unused = [x for x in second_candidates if x not in second_nos and x not in third_base and x not in himo_list]
-    second_unused_scores = [d for d in score_df if d["車番"] in second_unused]
-    if second_unused_scores:
-        third_base_extra = max(second_unused_scores, key=lambda x: x["スコア"])
-
-    low_rank_all = [d for d in score_df if d["得点順位"] in [5, 6, 7, 8, 9]]
-    himo_selected = [himo_1, himo_2]
-    himo_unused = [d for d in low_rank_all if d["車番"] not in himo_selected and d["車番"] not in himo_list]
-    if himo_unused:
-        himo_candidate_extra = max(himo_unused, key=lambda x: x["スコア"])
-
-    if third_base_extra and himo_candidate_extra:
-        better = third_base_extra if third_base_extra["スコア"] >= himo_candidate_extra["スコア"] else himo_candidate_extra
-        himo_list.append(better["車番"])
-    elif third_base_extra:
-        himo_list.append(third_base_extra["車番"])
-    elif himo_candidate_extra:
-        himo_list.append(himo_candidate_extra["車番"])
+# 近走指数/着順 or 時計（簡易）
+st.subheader("▼ 近走指標（指数 or 時計）・着順")
+idx_inputs = []
+chaku_inputs = []
+extra_banei = []  # (weight, stops)
+for i in range(N_MAX):
+    if mode == "平地(サラ)":
+        c1, c2, c3 = st.columns([1,1,1])
+        with c1:
+            base_idx = st.number_input(f"{i+1}番 基準指数", value=50.0, step=0.5, key=f"idx_{i}")
+        with c2:
+            ch1 = st.text_input(f"{i+1}番 前々走着", value="", key=f"hc1_{i}")
+        with c3:
+            ch2 = st.text_input(f"{i+1}番 前走着", value="", key=f"hc2_{i}")
+        idx_inputs.append(base_idx)
+        chaku_inputs.append([ch1, ch2])
+        extra_banei.append((0.0,0))
     else:
-        st.warning("\u26a0\ufe0f 補完対象が存在しません（third_base外れ or ヒモ\uff11\u2460外れ）")
+        c1, c2, c3 = st.columns([1,1,1])
+        with c1:
+            base_idx = st.number_input(f"{i+1}番 近走指数(任意)", value=50.0, step=0.5, key=f"idxb_{i}")
+        with c2:
+            wt = st.number_input(f"{i+1}番 斤量/重量[kg]", value=700.0, step=5.0, min_value=500.0, max_value=1100.0, key=f"wt_{i}")
+        with c3:
+            stops = st.number_input(f"{i+1}番 障害停止回数(前走)", value=0, step=1, min_value=0, max_value=5, key=f"stp_{i}")
+        idx_inputs.append(base_idx)
+        chaku_inputs.append(["",""])  # 使わない
+        extra_banei.append((wt, int(stops)))
 
-# --- 三連複構成 ---
-bets = set()
-for a, b in itertools.combinations(himo_list, 2):
-    combo = tuple(sorted([anchor_no, a, b]))
-    bets.add(combo)
+# 出走フラグ（空欄=欠）
+st.subheader("▼ 出走フラグ（数字=出走、空欄=欠）")
+run_flags = [st.text_input(f"{i+1}番 出走（1=走る/空欄=欠）", key=f"run_{i}") for i in range(N_MAX)]
 
-# --- 表示 ---
-st.markdown("### 三連複構成")
-st.markdown(f"◎：{anchor_no}")
-st.markdown(f"2列目（スコア上位）：{second_nos}")
-st.markdown(f"3列目候補：{sorted(himo_list)}")
-st.markdown(f"三連複 {len(bets)}点：")
-for b in sorted(bets):
-    st.markdown(f"- {b}")
+# =========================================
+# ロジック
+# =========================================
 
-# --- 確認用：競争得点順位含むデータ ---
-st.markdown("### 選手情報（得点順）")
-st.dataframe(df.sort_values(by='競争得点順位'))
+def convert_finish_to_score(values:list[str]):
+    """着順2戦を0..1に正規化（前走0.35重み）"""
+    scores = []
+    for i, v in enumerate(values):
+        v = str(v).strip()
+        try:
+            f = int(v)
+            if 1 <= f <= 18:
+                s = (19 - f) / 18.0
+                if i == 1:
+                    s *= 0.35
+                scores.append(s)
+        except ValueError:
+            continue
+    return round(sum(scores)/len(scores), 3) if scores else 0.0
+
+
+def pace_course_adjust(style:str, surface:str, surface_state:str, distance:int, circle:int, stretch:int, turns:int, pace:str):
+    """平地：距離×直線×馬場×ペース×脚質（簡易）。上限±0.06。"""
+    d_norm = max(0.8, min(2.6, distance/1000))
+    by_dist = {'逃': 0.02*(2.0-d_norm),'先': 0.01*(2.0-d_norm),'差': 0.01*(d_norm-1.4),'追': 0.02*(d_norm-1.4)}.get(style, 0.0)
+    long_st = max(0, (stretch-250)/100)*0.01
+    by_stretch = {'差': long_st, '追': long_st*1.2}.get(style, 0.0)
+    bb = {'良':0.0, '稍重':0.01, '重':0.015, '不良':0.02}.get(surface_state, 0.0)
+    by_baba = {'逃': bb, '先':bb*0.6, '差':-bb*0.6, '追':-bb}.get(style, 0.0)
+    by_pace = {'前傾': {'逃':0.02,'先':0.01}, '後傾': {'差':0.015,'追':0.02}}.get(pace, {}).get(style, 0.0)
+    total = by_dist + by_stretch + by_baba + by_pace
+    return round(max(min(total, 0.06), -0.06), 3)
+
+
+def banei_adjust(weight:float, stops:int, surface_state:str):
+    """ばんえい：重量・障害停止・馬場状態の簡易調整。上限±0.08（ひな形）。"""
+    # 重量（基準700kg）…重いほど厳しい
+    by_w = -0.0008 * (weight - 700.0)
+    # 停止回数ペナルティ
+    by_s = -0.02 * max(stops, 0)
+    # 馬場（重いほどパワー寄りで停止が出やすい想定。ここでは微負）
+    bb = {'良':0.0, '稍重':-0.01, '重':-0.015, '不良':-0.02}.get(surface_state, 0.0)
+    total = by_w + by_s + bb
+    return round(max(min(total, 0.08), -0.08), 3)
+
+
+def group_bonus_flat(rows, groups):
+    """平地：脚質陣営別の平均で順位→幾何減衰で配分（総予算0.30）。"""
+    if not rows:
+        return {k:0.0 for k in RUN_STYLES}
+    sums = {k:0.0 for k in RUN_STYLES}
+    counts = {k:0 for k in RUN_STYLES}
+    for row in rows:
+        no, total = row[0], row[-1]
+        g = groups.get(no)
+        if g in sums:
+            sums[g] += total
+            counts[g] += 1
+    adj = {k: (sums[k]/counts[k]) if counts[k] else -1e9 for k in RUN_STYLES}
+    order = [k for k,_ in sorted(adj.items(), key=lambda x:x[1], reverse=True) if counts[k] > 0]
+    r = 0.8
+    weights = [r**i for i in range(len(order))]
+    sw = sum(weights) if weights else 1.0
+    budget = 0.30
+    return {k: ((weights[order.index(k)]/sw)*budget if k in order else 0.0) for k in RUN_STYLES}
+
+# =========================================
+# 計算
+# =========================================
+active_idx = [i for i in range(N_MAX) if str(run_flags[i]).isdigit()]
+
+rows = []
+if mode == "平地(サラ)":
+    # 着順補正
+    fin_scores = [convert_finish_to_score(chaku_inputs[i]) if i in active_idx else 0.0 for i in range(N_MAX)]
+    # スコア算出
+    for i in active_idx:
+        no = i+1
+        style = horse_style.get(no, "差")
+        base = idx_inputs[i]
+        pf = pace_course_adjust(style, surface, surface_state, int(distance), int(circle), int(stretch), int(turns), pace_scn)
+        total = base + fin_scores[i] + pf
+        rows.append([no, style, base, fin_scores[i], pf, total])
+else:
+    # ばんえい簡易
+    for i in active_idx:
+        no = i+1
+        base = idx_inputs[i]
+        wt, stops = extra_banei[i]
+        ba = banei_adjust(wt, stops, surface_state)
+        total = base + ba
+        rows.append([no, "-", base, 0.0, ba, total])
+
+# 陣営ボーナス（平地のみ）
+if mode == "平地(サラ)":
+    groups = {i+1: (horse_style.get(i+1, None)) for i in range(N_MAX)}
+    bonus_map = group_bonus_flat(rows, groups)
+    rows2 = []
+    for no, style, base, fin, pf, total in rows:
+        gb = bonus_map.get(style, 0.0)
+        rows2.append([no, style, base, fin, pf, gb, total+gb])
+else:
+    rows2 = [[no, style, base, fin, pf, 0.0, total] for (no, style, base, fin, pf, total) in rows]
+
+# 表示
+if rows2:
+    cols = ["馬番","脚質","基準指数","着順/時計補正","コース/条件補正","陣営/群補正","合計スコア"]
+    df = pd.DataFrame(rows2, columns=cols)
+    st.markdown("### 📊 合計スコア順（β/ひな形）")
+    st.dataframe(df.sort_values(by="合計スコア", ascending=False).reset_index(drop=True))
+else:
+    st.info("出走フラグが未入力です。数字を入れると計算します。")
+
+
