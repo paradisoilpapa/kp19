@@ -1,286 +1,1446 @@
-import streamlit as st
+# -*- coding: utf-8 -*-
+
+from collections import defaultdict
+from typing import List, Dict, Tuple
+
 import pandas as pd
+import streamlit as st
 
-"""
-Velobi-K β（地方競馬スコア計算：NAR＋ばんえい対応）
-- 5〜12頭対応（欠頭数OK）
-- NAR公式コース情報をプリセット（帯広ばんえい含む）
-- モード切替：平地（サラ） / ばんえい（帯広）
-- 目的：まず“ひな形”として一括運用できる骨組みを提供（係数は後でチューニング）
-"""
+st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v10.0｜想定回収率・回収差判定｜固定想定ペア的%｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
 
-st.set_page_config(page_title="Velobi-K β（地方競馬/NAR＋ばんえい）", layout="wide")
-st.title("🏇 Velobi-K β（地方競馬スコア計算：NAR＋ばんえい対応）")
-st.caption("5〜12頭・NAR全場＋帯広（ばんえい）をこの1本で処理（欠頭数OK）")
+# =========================
+# 基本設定（7車ベース）
+# =========================
+FIELD_SIZE = 7
+WINNER_RANKS = tuple(range(1, 8))
+PATTERN_AXES = (1,)
+AXIS1_TARGETS = (2, 3)
+INDIVIDUAL_AXIS1_TARGETS = (2, 3)
+AXIS2_TARGETS = ()
+AXIS3_TARGETS = ()
 
-# =========================================
-# 設定
-# =========================================
-N_MAX = 12
+# 2車複：軸1・2限定の標準棚 + 穴棚
+# 標準棚：1-234 / 2-134
+# 穴棚：  1-567 / 2-567
+# 評価3は軸ではなく相手候補として扱います。
+NISHAFUKU_PAIRS = [
+    # 軸1に必要なペア
+    (1, 2), (1, 3), (1, 4),
+    (1, 5), (1, 6), (1, 7),
 
-# --- 競馬場プリセット（NAR公式ベース：直線は“ゴールまで”の長さ） ---
-TRACKS = {
-    # ばんえい
-    "帯広(ばんえい)": {"surface":"ダート","course":"直線","circle":200,"stretch":200,"turns":0,
-                 "obstacle1_m":1.0,"obstacle2_m":1.6},
+    # 軸2に必要なペア
+    (2, 3), (2, 4),
+    (2, 5), (2, 6), (2, 7),
+]
+NISHAFUKU_EXTRA_PAIRS = []
 
-    # ホッカイドウ・岩手
-    "門別":  {"surface":"ダート","course":"右","circle":1600,"stretch":330,"turns":2},
-    "盛岡":  {"surface":"ダート","course":"左","circle":1600,"stretch":300,"turns":2},
-    "水沢":  {"surface":"ダート","course":"右","circle":1200,"stretch":245,"turns":2},
-
-    # 南関東
-    "浦和":  {"surface":"ダート","course":"左","circle":1200,"stretch":220,"turns":2},
-    "船橋":  {"surface":"ダート","course":"左","circle":1400,"stretch":308,"turns":2},
-    "大井":  {"surface":"ダート","course":"右","circle":1600,"stretch":386,"turns":2},
-    "川崎":  {"surface":"ダート","course":"左","circle":1200,"stretch":300,"turns":2},
-
-    # 北陸・東海・近畿
-    "金沢":  {"surface":"ダート","course":"右","circle":1200,"stretch":236,"turns":2},
-    "笠松":  {"surface":"ダート","course":"右","circle":1100,"stretch":201,"turns":2},
-    "名古屋":{"surface":"ダート","course":"右","circle":1180,"stretch":240,"turns":2},
-    "園田":  {"surface":"ダート","course":"右","circle":1051,"stretch":213,"turns":2},
-    "姫路":  {"surface":"ダート","course":"右","circle":1200,"stretch":230,"turns":2},
-
-    # 四国・九州
-    "高知":  {"surface":"ダート","course":"右","circle":1100,"stretch":200,"turns":2},
-    "佐賀":  {"surface":"ダート","course":"右","circle":1100,"stretch":200,"turns":2},
-
-    # 手入力
-    "手入力": {"surface":"ダート","course":"右","circle":1400,"stretch":300,"turns":2}
+# 小倉ミッドナイトA級7車・直近2年ベースのペア別平均配当（100円あたり）。
+# 必要に応じて画面上で上書きできます。
+PAIR_BASE_AVG_PAY_DEFAULTS = {
+    "1-2": 271,
+    "1-3": 436,
+    "1-4": 654,
+    "1-5": 1059,
+    "1-6": 1754,
+    "1-7": 1519,
+    "2-3": 881,
+    "2-4": 1333,
+    "2-5": 1869,
+    "2-6": 1657,
+    "2-7": 4092,
 }
 
-SURFACE_STATES = ["良", "稍重", "重", "不良"]
-PACE_SCENARIOS = ["前傾", "平均", "後傾"]  # 平地のみ使用
-RUN_STYLES = ["逃", "先", "差", "追"]      # 平地のみ使用
-
-# --- UI安全化ヘルパ（表記ゆれ対応） ---
-_course_opts = ["右","左","直"]
-_course_alias = {
-    "右回り":"右", "右外":"右",
-    "左回り":"左",
-    "直線":"直", "直":"直",
-    "right":"右", "left":"左", "straight":"直"
+# 小倉ミッドナイトA級7車・直近2年ベースの固定想定的中率（%）。
+# 母数738R：1-2=167回、1-3=105回、1-4=78回、1-5=38回、1-6=26回、1-7=35回、
+# 2-3=46回、2-4=42回、2-5=27回、2-6=15回、2-7=22回。
+# 現在入力中の的中率とは独立した「想定ペア的%」として使用します。
+PAIR_BASE_HIT_RATE_DEFAULTS = {
+    "1-2": 22.6,
+    "1-3": 14.2,
+    "1-4": 10.6,
+    "1-5": 5.1,
+    "1-6": 3.5,
+    "1-7": 4.7,
+    "2-3": 6.2,
+    "2-4": 5.7,
+    "2-5": 3.7,
+    "2-6": 2.0,
+    "2-7": 3.0,
 }
-_surface_opts = ["ダート","芝"]
-_surface_alias = {
-    "砂":"ダート", "DIRT":"ダート",
-    "TURF":"芝"
+
+
+RANK_SYMBOLS = {
+    1: "評価１",
+    2: "評価２",
+    3: "評価３",
+    4: "評価４",
+    5: "評価５",
+    6: "評価６",
+    7: "評価７",
 }
 
-def safe_selectbox(label, options, value, aliases=None, default=0, key=None):
-    v = str(value)
-    if aliases:
-        v = aliases.get(v, v)
-    try:
-        idx = options.index(v)
-    except ValueError:
-        idx = default
-    return st.selectbox(label, options, index=idx, key=key)
 
-# =========================================
-# UI：コース/馬場/モード
-# =========================================
-colA, colB, colC = st.columns([1.2,1,1])
-with colA:
-    track = st.selectbox("競馬場（NAR＋ばんえい）", list(TRACKS.keys()), index=0)
-    info = TRACKS[track]
-with colB:
-    # 自動：帯広を選ぶとばんえいモード推奨
-    auto_is_banei = ("ばんえい" in track or (_course_alias.get(info.get("course","右"), info.get("course","右")) == "直" and info.get("turns",2)==0))
-    mode = st.radio("モード", ["平地(サラ)", "ばんえい"], index=1 if auto_is_banei else 0, horizontal=True)
-with colC:
-    surface_state = st.selectbox("馬場状態", SURFACE_STATES, index=0)
+def rank_symbol(r: int) -> str:
+    return RANK_SYMBOLS.get(r, f"評価{r}")
 
-# 距離・ペース（平地向け。ばんえい時も距離は参考として保持）
-colD, colE = st.columns([1,1])
-with colD:
-    distance = st.number_input("距離[m]", min_value=800, max_value=2600, step=100, value=1400)
-with colE:
-    pace_scn = st.selectbox("ペース想定", PACE_SCENARIOS, index=1)
 
-# 共通コース諸元（手入力上書き可）
-col1, col2, col3 = st.columns(3)
-with col1:
-    surface = safe_selectbox("コース種別", _surface_opts, info.get("surface","ダート"), aliases=_surface_alias)
-with col2:
-    course_dir = safe_selectbox("回り", _course_opts, info.get("course","右"), aliases=_course_alias)
-with col3:
-    circle = st.number_input("1周距離[m]", min_value=200, max_value=2200, step=50, value=int(info["circle"]))
+PairKey = Tuple[int, int]  # (winner_eval, second_eval)
 
-col4, col5 = st.columns(2)
-with col4:
-    stretch = st.number_input("直線長[m]（ゴールまで）", min_value=150 if mode=="平地(サラ)" else 200, max_value=500, step=10, value=int(info["stretch"]))
-with col5:
-    turns = st.number_input("コーナー数", min_value=0, max_value=4, step=1, value=int(info["turns"]))
 
-# =========================================
-# UI：馬データ
-# =========================================
-st.header("【馬データ入力】（欠頭数OK：空欄=除外）")
+def parse_rankline(s: str, expected_len: int) -> List[str]:
+    if not s:
+        return []
+    s = s.replace("-", "").replace(" ", "").replace("/", "").replace(",", "")
+    if not s.isdigit() or len(s) != expected_len:
+        return []
+    if any(ch not in "1234567" for ch in s):
+        return []
+    if len(set(s)) != len(s):
+        return []
+    return list(s)
 
-if mode == "平地(サラ)":
-    # 脚質入力
-    style_inputs = {}
-    cols = st.columns(4)
-    for i, k in enumerate(RUN_STYLES):
-        with cols[i]:
-            st.markdown(f"**{k}**")
-            style_inputs[k] = st.text_input("", key=f"style_{k}", max_chars=24)
-    # 馬番→脚質
-    horse_style = {}
-    for k, val in style_inputs.items():
-        for c in val:
-            if c.isdigit():
-                n = int(c)
-                if 1 <= n <= N_MAX:
-                    horse_style[n] = k
-else:
-    # ばんえい：脚質ではなく基礎能力の代理指標を入力
-    st.info("ばんえいモード：各馬の負担重量・障害対応・近走指数などを入力（簡易版）")
 
-# 近走指数/着順 or 時計（簡易）
-st.subheader("▼ 近走指標（指数 or 時計）・着順")
-idx_inputs = []
-chaku_inputs = []
-extra_banei = []  # (weight, stops)
-for i in range(N_MAX):
-    if mode == "平地(サラ)":
-        c1, c2, c3 = st.columns([1,1,1])
-        with c1:
-            base_idx = st.number_input(f"{i+1}番 基準指数", value=50.0, step=0.5, key=f"idx_{i}")
-        with c2:
-            ch1 = st.text_input(f"{i+1}番 前々走着", value="", key=f"hc1_{i}")
-        with c3:
-            ch2 = st.text_input(f"{i+1}番 前走着", value="", key=f"hc2_{i}")
-        idx_inputs.append(base_idx)
-        chaku_inputs.append([ch1, ch2])
-        extra_banei.append((0.0,0))
+def parse_finish(s: str) -> List[str]:
+    if not s:
+        return []
+    s = s.replace("-", "").replace(" ", "").replace("/", "").replace(",", "")
+    s = "".join(ch for ch in s if ch in "1234567")
+    out: List[str] = []
+    for ch in s:
+        if ch not in out:
+            out.append(ch)
+        if len(out) == 3:
+            break
+    return out
+
+
+def build_conditional_tables(pair_counts: Dict[PairKey, int]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    cols = list(range(1, FIELD_SIZE + 1))
+    count_rows = []
+    pct_rows = []
+
+    for wr in WINNER_RANKS:
+        total = 0
+        for rr in cols:
+            if rr == wr:
+                continue
+            total += int(pair_counts.get((wr, rr), 0))
+
+        row_c = {"1着の評価": wr, "N": total}
+        for rr in cols:
+            row_c[str(rr)] = None if rr == wr else int(pair_counts.get((wr, rr), 0))
+        count_rows.append(row_c)
+
+        row_p = {"1着の評価": wr, "N": total}
+        for rr in cols:
+            if rr == wr:
+                row_p[str(rr)] = None
+            else:
+                v = int(pair_counts.get((wr, rr), 0))
+                row_p[str(rr)] = round(100.0 * v / total, 1) if total > 0 else 0.0
+        pct_rows.append(row_p)
+
+    return pd.DataFrame(count_rows), pd.DataFrame(pct_rows)
+
+
+def rate(x: int, n: int):
+    return round(100.0 * x / n, 1) if n > 0 else None
+
+
+def new_payout_rec() -> Dict[str, int]:
+    return {"N": 0, "KSUM": 0, "H": 0, "SUM": 0}
+
+
+def add_rec(dst: Dict[str, int], src: Dict[str, int]):
+    for k in ("N", "KSUM", "H", "SUM"):
+        dst[k] += int(src.get(k, 0))
+
+
+def combine_recs(recs: List[Dict[str, int]]) -> Dict[str, int]:
+    """
+    同じレース群に対する複数買い目の合算。
+    Nは足さず、最大Nを使う。
+    KSUM/H/SUMは合算する。
+    """
+    out = new_payout_rec()
+    out["N"] = max((int(r.get("N", 0)) for r in recs), default=0)
+    for rec in recs:
+        out["KSUM"] += int(rec.get("KSUM", 0))
+        out["H"] += int(rec.get("H", 0))
+        out["SUM"] += int(rec.get("SUM", 0))
+    return out
+
+
+def targets_for_pattern(axis: int, field_n: int) -> List[int]:
+    """
+    2車単固定型の相手評価。
+    評価1→23
+    評価2→13
+    欠車対応：存在する評価だけ返す。
+    """
+    if axis == 1:
+        base = AXIS1_TARGETS
+    elif axis == 2:
+        base = AXIS2_TARGETS
     else:
-        c1, c2, c3 = st.columns([1,1,1])
-        with c1:
-            base_idx = st.number_input(f"{i+1}番 近走指数(任意)", value=50.0, step=0.5, key=f"idxb_{i}")
-        with c2:
-            wt = st.number_input(f"{i+1}番 斤量/重量[kg]", value=700.0, step=5.0, min_value=500.0, max_value=1100.0, key=f"wt_{i}")
-        with c3:
-            stops = st.number_input(f"{i+1}番 障害停止回数(前走)", value=0, step=1, min_value=0, max_value=5, key=f"stp_{i}")
-        idx_inputs.append(base_idx)
-        chaku_inputs.append(["",""])  # 使わない
-        extra_banei.append((wt, int(stops)))
+        base = ()
 
-# 出走フラグ（空欄=欠）
-st.subheader("▼ 出走フラグ（数字=出走、空欄=欠）")
-run_flags = [st.text_input(f"{i+1}番 出走（1=走る/空欄=欠）", key=f"run_{i}") for i in range(N_MAX)]
+    return [r for r in base if r <= field_n]
 
-# =========================================
-# ロジック
-# =========================================
 
-def convert_finish_to_score(values:list[str]):
-    """着順2戦を0..1に正規化（前走0.35重み）"""
-    scores = []
-    for i, v in enumerate(values):
-        v = str(v).strip()
+def ksum_2t_pattern(axis: int, field_n: int) -> int:
+    """2車単固定型の点数。"""
+    if axis > field_n:
+        return 0
+    return len(targets_for_pattern(axis, field_n))
+
+
+def hit_2t_pattern(axis: int, win_rank: int, sec_rank: int, field_n: int) -> bool:
+    """2車単固定型の的中判定。"""
+    if axis > field_n:
+        return False
+    return win_rank == axis and sec_rank in targets_for_pattern(axis, field_n)
+
+
+def pattern_label(axis: int) -> str:
+    if axis == 1:
+        return "2車単 1→23"
+    if axis == 2:
+        return "2車単 2→13"
+    return f"2車単 評価{axis}"
+
+
+def pair_target_label(axis: int, target: int) -> str:
+    return f"2車単 {axis}→{target}"
+
+
+def ksum_axis_to_target(axis: int, target: int, field_n: int) -> int:
+    """2車単：axis→target の点数。存在する評価だけ1点として扱う。"""
+    if field_n < 2:
+        return 0
+    if axis > field_n or target > field_n:
+        return 0
+    if axis == target:
+        return 0
+    return 1
+
+
+def hit_axis_to_target(axis: int, target: int, win_rank: int, sec_rank: int, field_n: int) -> bool:
+    """2車単：axis→target の的中判定。"""
+    if ksum_axis_to_target(axis, target, field_n) <= 0:
+        return False
+    return win_rank == axis and sec_rank == target
+
+
+def nishafuku_label(a: int, b: int) -> str:
+    return f"2車複 {a}-{b}"
+
+
+NISHAFUKU_SET_DEFS = {
+    # 標準棚：軸1・2のみ
+    "標準 1-234": [nishafuku_label(1, 2), nishafuku_label(1, 3), nishafuku_label(1, 4)],
+    "標準 2-134": [nishafuku_label(1, 2), nishafuku_label(2, 3), nishafuku_label(2, 4)],
+
+    # 穴棚：軸1・2のみ
+    "穴 1-567": [nishafuku_label(1, 5), nishafuku_label(1, 6), nishafuku_label(1, 7)],
+    "穴 2-567": [nishafuku_label(2, 5), nishafuku_label(2, 6), nishafuku_label(2, 7)],
+}
+
+agg_payout_nishafuku_set_manual: Dict[str, Dict[str, int]] = {
+    set_label: new_payout_rec() for set_label in NISHAFUKU_SET_DEFS
+}
+
+
+def ksum_nishafuku_pair(a: int, b: int, field_n: int) -> int:
+    """2車複：評価a-b の点数。存在する評価だけ1点として扱う。"""
+    if field_n < 2:
+        return 0
+    if a > field_n or b > field_n:
+        return 0
+    if a == b:
+        return 0
+    return 1
+
+
+def hit_nishafuku_pair(a: int, b: int, win_rank: int, sec_rank: int, field_n: int) -> bool:
+    """2車複：実際の1着・2着評価順位がa-bなら的中。順不同。"""
+    if ksum_nishafuku_pair(a, b, field_n) <= 0:
+        return False
+    return {win_rank, sec_rank} == {a, b}
+
+
+
+def payout_row(label: str, rec: Dict[str, int]) -> Dict:
+    N = int(rec["N"])
+    KSUM = int(rec["KSUM"])
+    H = int(rec["H"])
+    SUM = int(rec["SUM"])
+
+    invest = KSUM * 100
+    roi = round(100.0 * SUM / invest, 1) if invest > 0 else None
+    avg_pay = round(SUM / H, 1) if H > 0 else None
+    hit_rate = round(100.0 * H / N, 1) if N > 0 else None
+
+    return {
+        "型": label,
+        "対象N": N,
+        "総点数KSUM": KSUM,
+        "投資額換算": invest,
+        "払戻合計SUM": SUM,
+        "的中H": H,
+        "的中率%": hit_rate,
+        "平均配当": avg_pay,
+        "回収率%": roi,
+        "判定": "",
+    }
+
+
+def rec_for_labels(source: Dict[str, Dict[str, int]], labels: List[str]) -> Dict[str, int]:
+    """指定ラベル群の合算レコード。Nは最大N、KSUM/H/SUMは合算。"""
+    return combine_recs([source[label] for label in labels if label in source])
+
+
+def expected_set_hit_rate_from_pair12(labels: List[str], pair12_counts: Dict[PairKey, int]) -> float | None:
+    """
+    1→2着評価分布から、2車複セットの想定的中率を出す。
+    2車複なので順不同で集計する。
+
+    例：
+      1-234 = 1-2 / 1-3 / 1-4
+      → (1,2)+(2,1)+(1,3)+(3,1)+(1,4)+(4,1)
+    """
+    total = sum(int(v) for v in pair12_counts.values())
+    if total <= 0:
+        return None
+
+    hit = 0
+    for label in labels:
+        # label例: "2車複 1-4"
         try:
-            f = int(v)
-            if 1 <= f <= 18:
-                s = (19 - f) / 18.0
-                if i == 1:
-                    s *= 0.35
-                scores.append(s)
-        except ValueError:
+            pair_part = label.replace("2車複", "").strip()
+            a_str, b_str = pair_part.split("-")
+            a, b = int(a_str), int(b_str)
+        except Exception:
             continue
-    return round(sum(scores)/len(scores), 3) if scores else 0.0
+
+        hit += int(pair12_counts.get((a, b), 0))
+        hit += int(pair12_counts.get((b, a), 0))
+
+    return round(100.0 * hit / total, 1)
 
 
-def pace_course_adjust(style:str, surface:str, surface_state:str, distance:int, circle:int, stretch:int, turns:int, pace:str):
-    """平地：距離×直線×馬場×ペース×脚質（簡易）。上限±0.06。"""
-    d_norm = max(0.8, min(2.6, distance/1000))
-    by_dist = {'逃': 0.02*(2.0-d_norm),'先': 0.01*(2.0-d_norm),'差': 0.01*(d_norm-1.4),'追': 0.02*(d_norm-1.4)}.get(style, 0.0)
-    long_st = max(0, (stretch-250)/100)*0.01
-    by_stretch = {'差': long_st, '追': long_st*1.2}.get(style, 0.0)
-    bb = {'良':0.0, '稍重':0.01, '重':0.015, '不良':0.02}.get(surface_state, 0.0)
-    by_baba = {'逃': bb, '先':bb*0.6, '差':-bb*0.6, '追':-bb}.get(style, 0.0)
-    by_pace = {'前傾': {'逃':0.02,'先':0.01}, '後傾': {'差':0.015,'追':0.02}}.get(pace, {}).get(style, 0.0)
-    total = by_dist + by_stretch + by_baba + by_pace
-    return round(max(min(total, 0.06), -0.06), 3)
+def payout_row_with_expected_set_hit(label: str, rec: Dict[str, int], labels: List[str], pair12_counts: Dict[PairKey, int]) -> Dict:
+    """想定セット的中率と、実的中率との差を併記した行。"""
+    row = payout_row(label, rec)
+
+    expected_hit = expected_set_hit_rate_from_pair12(labels, pair12_counts)
+    row["想定セット的中率%"] = expected_hit
+
+    if row["的中率%"] is not None and expected_hit is not None:
+        row["想定差"] = round(row["的中率%"] - expected_hit, 1)
+    else:
+        row["想定差"] = None
+
+    return row
 
 
-def banei_adjust(weight:float, stops:int, surface_state:str):
-    """ばんえい：重量・障害停止・馬場状態の簡易調整。上限±0.08（ひな形）。"""
-    # 重量（基準700kg）…重いほど厳しい
-    by_w = -0.0008 * (weight - 700.0)
-    # 停止回数ペナルティ
-    by_s = -0.02 * max(stops, 0)
-    # 馬場（重いほどパワー寄りで停止が出やすい想定。ここでは微負）
-    bb = {'良':0.0, '稍重':-0.01, '重':-0.015, '不良':-0.02}.get(surface_state, 0.0)
-    total = by_w + by_s + bb
-    return round(max(min(total, 0.08), -0.08), 3)
+def expected_pair_hit_rate_from_pair12(a: int, b: int, pair12_counts: Dict[PairKey, int]) -> float | None:
+    """1→2着評価分布から、評価a-bの2車複想定的中率を出す。順不同。"""
+    total = sum(int(v) for v in pair12_counts.values())
+    if total <= 0:
+        return None
+    hit = int(pair12_counts.get((a, b), 0)) + int(pair12_counts.get((b, a), 0))
+    return round(100.0 * hit / total, 1)
 
 
-def group_bonus_flat(rows, groups):
-    """平地：脚質陣営別の平均で順位→幾何減衰で配分（総予算0.30）。"""
-    if not rows:
-        return {k:0.0 for k in RUN_STYLES}
-    sums = {k:0.0 for k in RUN_STYLES}
-    counts = {k:0 for k in RUN_STYLES}
-    for row in rows:
-        no, total = row[0], row[-1]
-        g = groups.get(no)
-        if g in sums:
-            sums[g] += total
-            counts[g] += 1
-    adj = {k: (sums[k]/counts[k]) if counts[k] else -1e9 for k in RUN_STYLES}
-    order = [k for k,_ in sorted(adj.items(), key=lambda x:x[1], reverse=True) if counts[k] > 0]
-    r = 0.8
-    weights = [r**i for i in range(len(order))]
-    sw = sum(weights) if weights else 1.0
-    budget = 0.30
-    return {k: ((weights[order.index(k)]/sw)*budget if k in order else 0.0) for k in RUN_STYLES}
+def diff_status(diff, expected=None) -> str:
+    """想定差の状態をざっくり表示。想定0%は候補対象外。"""
+    if expected is not None and expected == 0:
+        return "対象外"
+    if diff is None:
+        return ""
+    if diff >= 10:
+        return "当たりすぎ"
+    if diff <= -10:
+        return "当たらなすぎ"
+    return "中庸"
 
-# =========================================
-# 計算
-# =========================================
-active_idx = [i for i in range(N_MAX) if str(run_flags[i]).isdigit()]
 
-rows = []
-if mode == "平地(サラ)":
-    # 着順補正
-    fin_scores = [convert_finish_to_score(chaku_inputs[i]) if i in active_idx else 0.0 for i in range(N_MAX)]
-    # スコア算出
-    for i in active_idx:
-        no = i+1
-        style = horse_style.get(no, "差")
-        base = idx_inputs[i]
-        pf = pace_course_adjust(style, surface, surface_state, int(distance), int(circle), int(stretch), int(turns), pace_scn)
-        total = base + fin_scores[i] + pf
-        rows.append([no, style, base, fin_scores[i], pf, total])
-else:
-    # ばんえい簡易
-    for i in active_idx:
-        no = i+1
-        base = idx_inputs[i]
-        wt, stops = extra_banei[i]
-        ba = banei_adjust(wt, stops, surface_state)
-        total = base + ba
-        rows.append([no, "-", base, 0.0, ba, total])
+def _clean_num_list(values):
+    out = []
+    for v in values:
+        try:
+            if pd.notna(v):
+                out.append(float(v))
+        except Exception:
+            pass
+    return out
 
-# 陣営ボーナス（平地のみ）
-if mode == "平地(サラ)":
-    groups = {i+1: (horse_style.get(i+1, None)) for i in range(N_MAX)}
-    bonus_map = group_bonus_flat(rows, groups)
-    rows2 = []
-    for no, style, base, fin, pf, total in rows:
-        gb = bonus_map.get(style, 0.0)
-        rows2.append([no, style, base, fin, pf, gb, total+gb])
-else:
-    rows2 = [[no, style, base, fin, pf, 0.0, total] for (no, style, base, fin, pf, total) in rows]
 
-# 表示
-if rows2:
-    cols = ["馬番","脚質","基準指数","着順/時計補正","コース/条件補正","陣営/群補正","合計スコア"]
-    df = pd.DataFrame(rows2, columns=cols)
-    st.markdown("### 📊 合計スコア順（β/ひな形）")
-    st.dataframe(df.sort_values(by="合計スコア", ascending=False).reset_index(drop=True))
-else:
-    st.info("出走フラグが未入力です。数字を入れると計算します。")
+def _median(values):
+    vals = sorted(_clean_num_list(values))
+    n = len(vals)
+    if n == 0:
+        return None
+    mid = n // 2
+    if n % 2 == 1:
+        return vals[mid]
+    return (vals[mid - 1] + vals[mid]) / 2.0
+
+
+def _deviation_stats(value, values):
+    """平均差・中央値差・偏差値・基準位置を返す。少数候補でも落ちない軽量版。"""
+    try:
+        if value is None or pd.isna(value):
+            return {"平均差": None, "中央値差": None, "偏差値": None, "基準位置": ""}
+        x = float(value)
+    except Exception:
+        return {"平均差": None, "中央値差": None, "偏差値": None, "基準位置": ""}
+
+    vals = _clean_num_list(values)
+    if not vals:
+        return {"平均差": None, "中央値差": None, "偏差値": None, "基準位置": ""}
+
+    mean = sum(vals) / len(vals)
+    med = _median(vals)
+    var = sum((v - mean) ** 2 for v in vals) / len(vals) if len(vals) > 0 else 0.0
+    sd = var ** 0.5
+
+    mean_diff = round(x - mean, 1)
+    med_diff = round(x - med, 1) if med is not None else None
+    if sd > 0:
+        dev = round(50.0 + 10.0 * (x - mean) / sd, 1)
+    else:
+        dev = 50.0
+
+    if dev >= 60:
+        pos = "高すぎ"
+    elif dev >= 55:
+        pos = "やや高い"
+    elif dev <= 40:
+        pos = "低すぎ"
+    elif dev <= 45:
+        pos = "やや低い"
+    else:
+        pos = "中庸"
+
+    return {
+        "平均差": mean_diff,
+        "中央値差": med_diff,
+        "偏差値": dev,
+        "基準位置": pos,
+    }
+
+
+def render_sortable_table(df: pd.DataFrame, height: int = 470):
+    """Streamlit標準のソート可能表。判定・型を先頭に寄せ、横スクロールなしで見やすくする。"""
+    if df is None or df.empty:
+        st.info("表示するデータがありません。")
+        return
+
+    st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True,
+        height=height,
+    )
+
+
+
+# =========================
+# Tabs
+# =========================
+tabs = st.tabs(["日次手入力（最大36R）", "前日までの集計（累積）", "分析結果"])
+
+# 日次の入力行
+byrace_rows: List[Dict] = []
+
+# 前日まで：評価別（1～7）
+agg_rank_manual: Dict[int, Dict[str, int]] = defaultdict(
+    lambda: {"N": 0, "C1": 0, "C2": 0, "C3": 0}
+)
+
+# 前日まで：1→2（評価）
+pair12_manual: Dict[PairKey, int] = defaultdict(int)
+
+# 前日まで：新回収率
+# 2車単：1→23
+agg_payout_2t_pattern_manual: Dict[int, Dict[str, int]] = {
+    axis: new_payout_rec() for axis in PATTERN_AXES
+}
+
+# 前日まで：個別回収（任意入力）
+# 1→2 / 1→3
+agg_payout_axis_target_manual: Dict[Tuple[int, int], Dict[str, int]] = {
+    (1, target): new_payout_rec() for target in INDIVIDUAL_AXIS1_TARGETS
+}
+
+# 前日まで：2車複 1-23 + 5-12
+agg_payout_nishafuku_manual: Dict[str, Dict[str, int]] = {
+    nishafuku_label(a, b): new_payout_rec() for a, b in NISHAFUKU_PAIRS
+}
+for a, b in NISHAFUKU_EXTRA_PAIRS:
+    agg_payout_nishafuku_manual[nishafuku_label(a, b)] = new_payout_rec()
+
+
+
+
+# =========================
+# A. 日次手入力（欠車対応）
+# =========================
+with tabs[0]:
+    st.subheader("日次手入力（7車ベース・欠車対応・最大36R）")
+    st.caption(
+        "入力中の白化を抑えるため、フォーム送信式です。"
+        "V評価は頭数ぶんの桁数で入力（例：7車=1432567 / 6車=143256）。"
+        "着順は～3桁。2車複配当を入力。配当は100円あたりの払戻金（円）です。"
+    )
+
+    with st.form("daily_input_form"):
+        cols_hdr = st.columns([1, 1.1, 2.9, 1.2, 1.2])
+        cols_hdr[0].markdown("**R**")
+        cols_hdr[1].markdown("**頭数**")
+        cols_hdr[2].markdown("**V評価（頭数ぶんの桁数）**")
+        cols_hdr[3].markdown("**着順(～3桁)**")
+        cols_hdr[4].markdown("**2車複配当**")
+
+        daily_inputs = []
+
+        for i in range(1, 37):
+            c1, c2, c3, c4, c5 = st.columns([1, 1.1, 2.9, 1.2, 1.2])
+
+            rid = c1.text_input("", key=f"rid_{i}", value=str(i))
+            field_n = c2.selectbox("", options=[7, 6, 5], index=0, key=f"field_n_{i}")
+            vline = c3.text_input("", key=f"vline_{i}", value="")
+            fin = c4.text_input("", key=f"fin_{i}", value="")
+            pay_2f = c5.number_input("", key=f"pay2f_{i}", min_value=0, value=0, step=10)
+            pay_2t = 0
+
+            daily_inputs.append(
+                {
+                    "rid": rid,
+                    "field_n": field_n,
+                    "vline": vline,
+                    "fin": fin,
+                    "pay_2t": pay_2t,
+                    "pay_2f": pay_2f,
+                }
+            )
+
+        st.form_submit_button("日次入力を反映")
+
+    for item in daily_inputs:
+        rid = item["rid"]
+        field_n = int(item["field_n"])
+        vline = item["vline"]
+        fin = item["fin"]
+        pay_2t = int(item["pay_2t"])
+        pay_2f = int(item["pay_2f"])
+
+        vorder = parse_rankline(vline, field_n)
+        finish = parse_finish(fin)
+
+        any_input = any([vline.strip(), fin.strip(), pay_2f > 0])
+        if any_input:
+            if not vorder:
+                st.warning(f"R{rid}: 頭数{field_n}なので、V評価は{field_n}桁で入力してください。")
+                continue
+
+            vset = set(vorder)
+            invalid_finish = [x for x in finish if x not in vset]
+            if invalid_finish:
+                st.warning(
+                    f"R{rid}: 着順 {''.join(invalid_finish)} がV評価（出走車）に含まれていません。"
+                    " 欠車/入力ミスの可能性があります。"
+                )
+
+            byrace_rows.append(
+                {
+                    "race": rid,
+                    "field_n": field_n,
+                    "vorder": vorder,
+                    "finish": finish,
+                    "pay_2t": pay_2t,
+                    "pay_2f": pay_2f,
+                }
+            )
+
+
+# =========================
+# B. 前日までの集計（累積）
+# =========================
+with tabs[1]:
+    st.subheader("前日までの集計（累積・全体）")
+    st.caption("入力中の白化を抑えるため、フォーム送信式です。入力後に下のボタンを押してください。")
+
+    with st.form("prev_aggregate_form"):
+        cols_12 = list(range(1, FIELD_SIZE + 1))
+
+        st.markdown("## 1→2 着評価分布（累積・回数）")
+        st.caption("1着が評価1〜7のとき、2着の評価の回数を入力。")
+
+        h = st.columns([1.8] + [1] * len(cols_12))
+        h[0].markdown("**条件：1着の評価**")
+        for j, rr in enumerate(cols_12, start=1):
+            h[j].markdown(f"**2着={rr}**")
+
+        pair_inputs = []
+        for wr in WINNER_RANKS:
+            row_cols = st.columns([1.8] + [1] * len(cols_12))
+            row_cols[0].write(f"評価{wr}が1着")
+            for j, rr in enumerate(cols_12, start=1):
+                if rr == wr:
+                    row_cols[j].write("")
+                    continue
+                v = row_cols[j].number_input(
+                    "",
+                    key=f"pair12_prev_wr{wr}_rr{rr}",
+                    min_value=0,
+                    value=0,
+                )
+                pair_inputs.append((wr, rr, int(v)))
+
+        st.divider()
+
+        st.markdown("## 評価別 入賞回数（累積）")
+        st.caption("評価1～7まで入力。Nは各評価が存在したレース数。")
+
+        hdr = st.columns([1.8, 1, 1, 1.8])
+        hdr[0].markdown("**評価**")
+        hdr[1].markdown("**出走数N**")
+        hdr[2].markdown("**1着回数**")
+        hdr[3].markdown("**2着回数 / 3着回数**")
+
+        rank_inputs = []
+        for r in range(1, 8):
+            c0, c1, c2, c3 = st.columns([1.8, 1, 1, 1.8])
+            c0.write(rank_symbol(r))
+            N = c1.number_input("", key=f"aggN_{r}", min_value=0, value=0)
+            C1 = c2.number_input("", key=f"aggC1_{r}", min_value=0, value=0)
+            c3_cols = c3.columns(2)
+            C2 = c3_cols[0].number_input("", key=f"aggC2_{r}", min_value=0, value=0)
+            C3 = c3_cols[1].number_input("", key=f"aggC3_{r}", min_value=0, value=0)
+            rank_inputs.append((r, int(N), int(C1), int(C2), int(C3)))
+
+        st.divider()
+
+        # 固定型（1→23 / 2→13）の累積入力は削除。
+        # 必要な確認は下の「個別2車複 引継ぎ入力」で行う。
+        payout_inputs = []
+
+        st.divider()
+
+        st.markdown("## 個別2車複 引継ぎ入力（累積）")
+        st.caption(
+            "分析結果の『個別2車複 引継ぎ用累積表』をそのまま転記します。"
+            "対象N・払戻合計SUM・的中Hだけ入力。KSUMは対象Nと同じ扱いで自動計算します。"
+            " 1-7・2-7も低頻度確認用として残しますが、未回収なら候補には入りません。"
+        )
+
+        nishafuku_pair_inputs = []
+
+        def _pair_input_block(title: str, pairs: List[Tuple[int, int]]):
+            st.markdown(f"**{title}**")
+            h_pair = st.columns([1.35, 0.85, 1.05, 0.75])
+            h_pair[0].markdown("**型**")
+            h_pair[1].markdown("**N**")
+            h_pair[2].markdown("**SUM**")
+            h_pair[3].markdown("**H**")
+
+            for a, b in pairs:
+                label = nishafuku_label(a, b)
+                safe_key = label.replace(" ", "_").replace("-", "_")
+                c0, c1, c2, c3 = st.columns([1.35, 0.85, 1.05, 0.75])
+                c0.write(label.replace("2車複 ", ""))
+                N = c1.number_input("", key=f"prev_pair_{safe_key}_N", min_value=0, value=0, label_visibility="collapsed")
+                SUM = c2.number_input("", key=f"prev_pair_{safe_key}_SUM", min_value=0, value=0, step=10, label_visibility="collapsed")
+                H = c3.number_input("", key=f"prev_pair_{safe_key}_H", min_value=0, value=0, label_visibility="collapsed")
+                nishafuku_pair_inputs.append((label, int(N), int(SUM), int(H)))
+
+        left_pairs = [(1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7)]
+        right_pairs = [(2, 3), (2, 4), (2, 5), (2, 6), (2, 7)]
+        col_left, col_right = st.columns(2)
+        with col_left:
+            _pair_input_block("評価1軸", left_pairs)
+        with col_right:
+            _pair_input_block("評価2軸", right_pairs)
+
+        st.divider()
+
+        nishafuku_set_inputs = []
+
+        st.form_submit_button("前日までの集計を反映")
+
+    for wr, rr, v in pair_inputs:
+        if v:
+            pair12_manual[(wr, rr)] += int(v)
+
+    for r, N, C1, C2, C3 in rank_inputs:
+        if any([N, C1, C2, C3]):
+            rec = agg_rank_manual[r]
+            rec["N"] += int(N)
+            rec["C1"] += int(C1)
+            rec["C2"] += int(C2)
+            rec["C3"] += int(C3)
+
+    for axis, N, KSUM, SUM, H in payout_inputs:
+        if any([N, KSUM, SUM, H]):
+            rec = agg_payout_2t_pattern_manual[axis]
+            rec["N"] += int(N)
+            rec["KSUM"] += int(KSUM)
+            rec["SUM"] += int(SUM)
+            rec["H"] += int(H)
+
+    for label, N, SUM, H in nishafuku_pair_inputs:
+        if any([N, SUM, H]) and label in agg_payout_nishafuku_manual:
+            rec = agg_payout_nishafuku_manual[label]
+            rec["N"] += int(N)
+            rec["KSUM"] += int(N)
+            rec["SUM"] += int(SUM)
+            rec["H"] += int(H)
+
+    for set_label, N, KSUM, SUM, H in nishafuku_set_inputs:
+        if any([N, KSUM, SUM, H]):
+            rec = agg_payout_nishafuku_set_manual[set_label]
+            rec["N"] += int(N)
+            rec["KSUM"] += int(KSUM)
+            rec["SUM"] += int(SUM)
+            rec["H"] += int(H)
+
+
+# =========================
+# 集計：日次 + 前日まで累積
+# =========================
+rank_daily: Dict[int, Dict[str, int]] = {
+    r: {"N": 0, "C1": 0, "C2": 0, "C3": 0} for r in range(1, 8)
+}
+
+for row in byrace_rows:
+    vorder = row.get("vorder", [])
+    finish = row.get("finish", [])
+    if not vorder:
+        continue
+
+    car_by_rank = {i + 1: vorder[i] for i in range(len(vorder))}
+
+    for r in range(1, len(vorder) + 1):
+        rank_daily[r]["N"] += 1
+        car = car_by_rank.get(r)
+        if car is None:
+            continue
+
+        if len(finish) >= 1 and finish[0] == car:
+            rank_daily[r]["C1"] += 1
+        if len(finish) >= 2 and finish[1] == car:
+            rank_daily[r]["C2"] += 1
+        if len(finish) >= 3 and finish[2] == car:
+            rank_daily[r]["C3"] += 1
+
+rank_total: Dict[int, Dict[str, int]] = {
+    r: {"N": 0, "C1": 0, "C2": 0, "C3": 0} for r in range(1, 8)
+}
+
+for r in range(1, 8):
+    for k in ("N", "C1", "C2", "C3"):
+        rank_total[r][k] += rank_daily[r][k]
+
+for r, rec in agg_rank_manual.items():
+    if r in rank_total:
+        rank_total[r]["N"] += rec["N"]
+        rank_total[r]["C1"] += rec["C1"]
+        rank_total[r]["C2"] += rec["C2"]
+        rank_total[r]["C3"] += rec["C3"]
+
+pair12_daily: Dict[PairKey, int] = defaultdict(int)
+
+for row in byrace_rows:
+    vorder = row.get("vorder", [])
+    finish = row.get("finish", [])
+    if len(finish) < 2 or not vorder:
+        continue
+
+    car_to_rank = {car: i + 1 for i, car in enumerate(vorder)}
+    win_rank = car_to_rank.get(finish[0])
+    sec_rank = car_to_rank.get(finish[1])
+
+    if win_rank is None or sec_rank is None:
+        continue
+
+    pair12_daily[(int(win_rank), int(sec_rank))] += 1
+
+pair12_total: Dict[PairKey, int] = defaultdict(int)
+for k, v in pair12_daily.items():
+    pair12_total[k] += int(v)
+for k, v in pair12_manual.items():
+    pair12_total[k] += int(v)
+
+# --- 新回収率（日次） ---
+# 2車単：1→23
+payout_2t_pattern_daily: Dict[int, Dict[str, int]] = {
+    axis: new_payout_rec() for axis in PATTERN_AXES
+}
+
+for row in byrace_rows:
+    vorder = row.get("vorder", [])
+    finish = row.get("finish", [])
+    field_n = int(row.get("field_n", len(vorder) or 0))
+
+    if not vorder or field_n <= 0 or len(finish) < 2:
+        continue
+
+    car_to_rank = {car: i + 1 for i, car in enumerate(vorder)}
+
+    win_rank = car_to_rank.get(finish[0])
+    sec_rank = car_to_rank.get(finish[1])
+
+    if win_rank is None or sec_rank is None:
+        continue
+
+    win_rank = int(win_rank)
+    sec_rank = int(sec_rank)
+    pay_2t = int(row.get("pay_2t", 0))
+
+    for axis in PATTERN_AXES:
+        ksum = ksum_2t_pattern(axis, field_n)
+        if ksum <= 0:
+            continue
+
+        rec = payout_2t_pattern_daily[axis]
+        rec["N"] += 1
+        rec["KSUM"] += ksum
+
+        if hit_2t_pattern(axis, win_rank, sec_rank, field_n):
+            if pay_2t > 0:
+                rec["H"] += 1
+                rec["SUM"] += pay_2t
+
+# --- 個別（日次） ---
+# 2車単：1→2 / 1→3
+INDIVIDUAL_PAIRS = [(1, target) for target in INDIVIDUAL_AXIS1_TARGETS]
+payout_axis_target_daily: Dict[Tuple[int, int], Dict[str, int]] = {
+    pair: new_payout_rec() for pair in INDIVIDUAL_PAIRS
+}
+
+for row in byrace_rows:
+    vorder = row.get("vorder", [])
+    finish = row.get("finish", [])
+    field_n = int(row.get("field_n", len(vorder) or 0))
+
+    if not vorder or field_n <= 0 or len(finish) < 2:
+        continue
+
+    car_to_rank = {car: i + 1 for i, car in enumerate(vorder)}
+
+    win_rank = car_to_rank.get(finish[0])
+    sec_rank = car_to_rank.get(finish[1])
+
+    if win_rank is None or sec_rank is None:
+        continue
+
+    win_rank = int(win_rank)
+    sec_rank = int(sec_rank)
+    pay_2t = int(row.get("pay_2t", 0))
+
+    for axis, target in INDIVIDUAL_PAIRS:
+        ksum = ksum_axis_to_target(axis, target, field_n)
+        if ksum <= 0:
+            continue
+
+        rec = payout_axis_target_daily[(axis, target)]
+        rec["N"] += 1
+        rec["KSUM"] += ksum
+
+        if hit_axis_to_target(axis, target, win_rank, sec_rank, field_n):
+            if pay_2t > 0:
+                rec["H"] += 1
+                rec["SUM"] += pay_2t
+
+
+# --- 2車複シミュレーション（日次） ---
+payout_nishafuku_daily: Dict[str, Dict[str, int]] = {
+    nishafuku_label(a, b): new_payout_rec() for a, b in NISHAFUKU_PAIRS
+}
+for a, b in NISHAFUKU_EXTRA_PAIRS:
+    payout_nishafuku_daily[nishafuku_label(a, b)] = new_payout_rec()
+
+for row in byrace_rows:
+    vorder = row.get("vorder", [])
+    finish = row.get("finish", [])
+    field_n = int(row.get("field_n", len(vorder) or 0))
+
+    if not vorder or field_n <= 0 or len(finish) < 2:
+        continue
+
+    car_to_rank = {car: i + 1 for i, car in enumerate(vorder)}
+
+    win_rank = car_to_rank.get(finish[0])
+    sec_rank = car_to_rank.get(finish[1])
+
+    if win_rank is None or sec_rank is None:
+        continue
+
+    win_rank = int(win_rank)
+    sec_rank = int(sec_rank)
+    pay_2f = int(row.get("pay_2f", 0))
+
+
+    for a, b in NISHAFUKU_PAIRS:
+        label = nishafuku_label(a, b)
+        ksum = ksum_nishafuku_pair(a, b, field_n)
+        if ksum <= 0:
+            continue
+
+        rec = payout_nishafuku_daily[label]
+        rec["N"] += 1
+        rec["KSUM"] += ksum
+
+        if hit_nishafuku_pair(a, b, win_rank, sec_rank, field_n):
+            if pay_2f > 0:
+                rec["H"] += 1
+                rec["SUM"] += pay_2f
+
+
+    for a, b in NISHAFUKU_EXTRA_PAIRS:
+        label = nishafuku_label(a, b)
+        ksum = ksum_nishafuku_pair(a, b, field_n)
+        if ksum <= 0:
+            continue
+
+        rec = payout_nishafuku_daily[label]
+        rec["N"] += 1
+        rec["KSUM"] += ksum
+
+        if hit_nishafuku_pair(a, b, win_rank, sec_rank, field_n):
+            if pay_2f > 0:
+                rec["H"] += 1
+                rec["SUM"] += pay_2f
+
+
+
+
+
+
+payout_2t_pattern_total: Dict[int, Dict[str, int]] = {
+    axis: new_payout_rec() for axis in PATTERN_AXES
+}
+
+for axis in PATTERN_AXES:
+    add_rec(payout_2t_pattern_total[axis], payout_2t_pattern_daily[axis])
+    add_rec(payout_2t_pattern_total[axis], agg_payout_2t_pattern_manual[axis])
+
+
+payout_axis_target_total: Dict[Tuple[int, int], Dict[str, int]] = {
+    pair: new_payout_rec() for pair in INDIVIDUAL_PAIRS
+}
+
+for pair in INDIVIDUAL_PAIRS:
+    add_rec(payout_axis_target_total[pair], payout_axis_target_daily[pair])
+    add_rec(payout_axis_target_total[pair], agg_payout_axis_target_manual[pair])
+
+payout_nishafuku_total: Dict[str, Dict[str, int]] = {
+    nishafuku_label(a, b): new_payout_rec() for a, b in NISHAFUKU_PAIRS
+}
+for a, b in NISHAFUKU_EXTRA_PAIRS:
+    payout_nishafuku_total[nishafuku_label(a, b)] = new_payout_rec()
+
+for label in payout_nishafuku_total.keys():
+    add_rec(payout_nishafuku_total[label], payout_nishafuku_daily[label])
+    add_rec(payout_nishafuku_total[label], agg_payout_nishafuku_manual[label])
+
+
+
+
+
+# =========================
+# 出力：分析結果
+# =========================
+with tabs[2]:
+    st.subheader("1→2 着評価分布（全体累積）｜1着が評価1〜7のとき（欠車対応）")
+    st.caption("欠車レースでは存在しない下位評価はNに含まれません。")
+
+    df12_count, df12_pct = build_conditional_tables(pair12_total)
+
+    st.markdown("### 回数（Nは条件付き総数）")
+    st.dataframe(df12_count, use_container_width=True, hide_index=True)
+
+    st.markdown("### 割合%（同評価セルは空欄）")
+    st.dataframe(df12_pct, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    st.subheader("評価別 入賞テーブル（全体累積）｜欠車対応")
+    rows_out = []
+    for r in range(1, 8):
+        rec = rank_total.get(r, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
+        N, C1, C2, C3 = rec["N"], rec["C1"], rec["C2"], rec["C3"]
+        rows_out.append(
+            {
+                "評価": rank_symbol(r),
+                "出走数N": N,
+                "1着回数": C1,
+                "2着回数": C2,
+                "3着回数": C3,
+                "1着率%": rate(C1, N),
+                "連対率%": rate(C1 + C2, N),
+                "3着内率%": rate(C1 + C2 + C3, N),
+            }
+        )
+    st.dataframe(pd.DataFrame(rows_out), use_container_width=True, hide_index=True)
+
+    st.divider()
+    st.divider()
+
+    st.markdown("### 個別2車複候補｜評価1・2軸 合成ペア比較")
+    st.caption("標準棚/穴棚シミュレーターと波履歴は削除。個別ペアの偏差値・配当係数・未回収除外・配当戻り余地で3〜4点を選びます。1-2は低配当安定枠として別判定します。")
+
+    st.markdown("#### 配当収束シミュレーション設定")
+    st.caption("平均配当はペア別基準配当で判定します。想定ペア的%は小倉ミッドナイトA級7車・直近2年の固定的中率を使用します。")
+    c_pay1, c_pay2, c_pay3 = st.columns([1, 1, 3])
+    OVERHEAT_Z = c_pay1.number_input(
+        "的中過熱偏差値",
+        key="overheat_z_line",
+        min_value=50.0,
+        max_value=80.0,
+        value=60.0,
+        step=1.0,
+        format="%.1f",
+    )
+    PAY_OVERHEAT_Z = c_pay2.number_input(
+        "配当過熱偏差値",
+        key="pay_overheat_z_line",
+        min_value=50.0,
+        max_value=90.0,
+        value=60.0,
+        step=1.0,
+        format="%.1f",
+    )
+    c_pay3.write("ペアごとに基準配当を変え、さらに配当偏差値が高すぎるペアは過熱として候補から外します。")
+
+    with st.expander("ペア別基準配当を確認・調整", expanded=False):
+        st.caption("初期値：小倉ミッドナイトA級7車・直近2年。会場や条件を変える場合はここを上書きしてください。")
+        pair_base_avg_pay = {}
+        base_pairs = [
+            ("1-2", 271), ("1-3", 436), ("1-4", 654),
+            ("1-5", 1059), ("1-6", 1754), ("1-7", 1519),
+            ("2-3", 881), ("2-4", 1333), ("2-5", 1869),
+            ("2-6", 1657), ("2-7", 4092),
+        ]
+        for i in range(0, len(base_pairs), 4):
+            cols = st.columns(4)
+            for col, (pair_key, default_pay) in zip(cols, base_pairs[i:i+4]):
+                pair_base_avg_pay[pair_key] = col.number_input(
+                    pair_key,
+                    key=f"pair_base_avg_pay_{pair_key.replace('-', '_')}",
+                    min_value=100,
+                    value=int(PAIR_BASE_AVG_PAY_DEFAULTS.get(pair_key, default_pay)),
+                    step=10,
+                )
+
+    st.markdown("### 最終2車複候補｜評価1・2軸")
+    st.caption("評価1軸・評価2軸の個別2車複を、安定枠・中庸枠・歪み枠に分けて比較します。本線は2点固定。歪み枠は本線に入れず、注として監視表示します。")
+    st.caption("想定ペア的%は、現在の入力データではなく小倉ミッドA級7車・直近2年の固定値を強制使用します。例：1-2=22.6、2-4=5.7、2-7=3.0。")
+
+    c_final1, c_final2, c_final3, c_final4, c_final5 = st.columns([1, 1, 1, 1, 2])
+    FINAL_POINT_N = c_final1.number_input(
+        "本線点数",
+        key="final_point_n_axis12",
+        min_value=2,
+        max_value=2,
+        value=2,
+        step=1,
+        help="実戦で買う柱の点数。現在は2点固定です。",
+    )
+    MIN_EXPECTED_PAIR_RATE = c_final2.number_input(
+        "最低想定ペア的%",
+        key="min_expected_pair_rate_axis12",
+        min_value=0.0,
+        max_value=30.0,
+        value=0.0,
+        step=0.5,
+        format="%.1f",
+    )
+    NOTE_MAX_N = c_final3.number_input(
+        "注表示最大",
+        key="note_max_n_axis12",
+        min_value=0,
+        max_value=6,
+        value=3,
+        step=1,
+        help="歪み枠を注として表示する最大数。予算が増えた時の追加候補です。",
+    )
+    ROI_DIFF_LIMIT = c_final4.number_input(
+        "回収差許容",
+        key="roi_diff_limit_axis12",
+        min_value=0.0,
+        max_value=50.0,
+        value=10.0,
+        step=1.0,
+        format="%.1f",
+        help="実回収率−想定回収率がこの値を超えたペアは後追い扱いで候補から外します。",
+    )
+    PAY_RETURN_ONLY = c_final5.checkbox(
+        "未回収除外＋配当戻り優先",
+        key="pay_return_only_axis12",
+        value=True,
+        help="ONの場合、未回収ペアを除外し、配当安すぎ〜基準付近を優先。ただし回収率180%以上・的中偏差値/配当偏差値が過熱ライン以上は除外します。",
+    )
+    st.caption("評価1・評価2を両方候補化。未回収・過熱・想定回収率超えすぎを除外し、本線は安定枠＋中庸枠を優先して2点まで。歪み枠は候補欄ではなく『注』欄に表示します。")
+
+    pair_rows = []
+    for axis in [1, 2]:
+        for opp in range(1, 8):
+            if opp == axis:
+                continue
+            # 2車複は順不同なので、評価2軸の相手1（2-1）は評価1-2と重複。
+            # 表示・候補選定ともに1-2側だけを残す。
+            if axis == 2 and opp == 1:
+                continue
+
+            a, b = sorted((axis, opp))
+            label = nishafuku_label(a, b)
+            rec = payout_nishafuku_total.get(label, new_payout_rec())
+            row = payout_row(label, rec)
+
+            pair_key = f"{a}-{b}"
+            # 想定ペア的%は現在入力データから計算しない。
+            # 小倉ミッドA級7車・直近2年の固定値をそのまま使用する。
+            expected_pair = PAIR_BASE_HIT_RATE_DEFAULTS.get(pair_key)
+            expected_pair = round(float(expected_pair), 1) if expected_pair is not None else None
+            row["軸"] = f"評価{axis}"
+            row["軸番号"] = axis
+            row["相手"] = opp
+            row["ペアキー"] = pair_key
+            row["想定ペア的%"] = expected_pair
+
+            if row["的中率%"] is not None and expected_pair is not None:
+                diff = round(float(row["的中率%"] ) - float(expected_pair), 1)
+            else:
+                diff = None
+
+            row["想定差"] = diff
+            row["状態"] = diff_status(diff, expected_pair)
+
+            pair_base_pay = int(pair_base_avg_pay.get(f"{a}-{b}", PAIR_BASE_AVG_PAY_DEFAULTS.get(f"{a}-{b}", 1200)))
+            row["ペア基準配当"] = pair_base_pay
+
+            if expected_pair is not None and pair_base_pay > 0:
+                row["想定回収率%"] = round(float(expected_pair) * float(pair_base_pay) / 100.0, 1)
+            else:
+                row["想定回収率%"] = None
+
+            actual_roi = row.get("回収率%")
+            if actual_roi is not None and pd.notna(actual_roi) and row["想定回収率%"] is not None:
+                row["回収差"] = round(float(actual_roi) - float(row["想定回収率%"]), 1)
+            else:
+                row["回収差"] = None
+
+            avg_pay = row.get("平均配当")
+            if avg_pay is not None and pd.notna(avg_pay) and pair_base_pay > 0:
+                row["配当係数"] = round(float(avg_pay) / float(pair_base_pay), 2)
+                row["配当差"] = round(float(avg_pay) - float(pair_base_pay), 1)
+            else:
+                row["配当係数"] = None
+                row["配当差"] = None
+
+            row["配当位置"] = ""
+            row["配当戻り余地"] = ""
+            row["総合候補理由"] = ""
+            row["判定"] = ""
+            pair_rows.append(row)
+
+    df_pairs = pd.DataFrame(pair_rows)
+
+    if not df_pairs.empty and df_pairs["想定差"].notna().any():
+        candidate_mask = (
+            df_pairs["想定差"].notna()
+            & df_pairs["想定ペア的%"].notna()
+            & (df_pairs["想定ペア的%"] > float(MIN_EXPECTED_PAIR_RATE))
+        )
+
+        # 評価1・2の全候補を同一母集団として、平均差・中央値差・偏差値を出す。
+        diff_values = df_pairs.loc[candidate_mask, "想定差"].tolist() if candidate_mask.any() else []
+        # 配当偏差値は「平均配当そのもの」ではなく、
+        # ペア基準配当との差（配当差）を母集団にして計算する。
+        # 例：1-2の平均348円・基準271円なら配当差+77円。
+        pay_values = df_pairs.loc[candidate_mask & df_pairs["配当差"].notna(), "配当差"].tolist() if candidate_mask.any() else []
+
+        for idx in df_pairs.index:
+            stats = _deviation_stats(df_pairs.loc[idx, "想定差"], diff_values)
+            df_pairs.loc[idx, "平均差"] = stats.get("平均差")
+            df_pairs.loc[idx, "中央値差"] = stats.get("中央値差")
+            df_pairs.loc[idx, "偏差値"] = stats.get("偏差値")
+            df_pairs.loc[idx, "基準位置"] = stats.get("基準位置")
+
+            pay_stats = _deviation_stats(df_pairs.loc[idx, "配当差"], pay_values)
+            df_pairs.loc[idx, "配当偏差値"] = pay_stats.get("偏差値")
+
+            coef = df_pairs.loc[idx, "配当係数"]
+            if pd.isna(coef):
+                df_pairs.loc[idx, "配当位置"] = "未回収"
+            elif float(coef) < 0.80:
+                df_pairs.loc[idx, "配当位置"] = "安すぎ"
+            elif float(coef) <= 1.30:
+                df_pairs.loc[idx, "配当位置"] = "基準付近"
+            else:
+                df_pairs.loc[idx, "配当位置"] = "高すぎ"
+
+        if candidate_mask.any():
+            expected_median = _median(df_pairs.loc[candidate_mask, "想定ペア的%"].tolist())
+            df_pairs["_expected_ok"] = df_pairs["想定ペア的%"].apply(
+                lambda x: bool(pd.notna(x) and expected_median is not None and float(x) >= float(expected_median))
+            )
+            df_pairs["_below_base"] = (
+                (df_pairs["中央値差"].notna() & (df_pairs["中央値差"] < 0))
+                | (df_pairs["偏差値"].notna() & (df_pairs["偏差値"] < 50))
+            )
+            df_pairs["_overhit"] = df_pairs["偏差値"].notna() & (df_pairs["偏差値"] >= float(OVERHEAT_Z))
+            df_pairs["_pay_dev_overheat"] = df_pairs["配当偏差値"].notna() & (df_pairs["配当偏差値"] >= float(PAY_OVERHEAT_Z))
+            df_pairs["_cold"] = df_pairs["偏差値"].notna() & (df_pairs["偏差値"] <= 40)
+            df_pairs["_pay_low"] = df_pairs["配当係数"].notna() & (df_pairs["配当係数"] < 0.80)
+            df_pairs["_pay_near"] = df_pairs["配当係数"].notna() & (df_pairs["配当係数"] >= 0.80) & (df_pairs["配当係数"] <= 1.30)
+            df_pairs["_pay_high"] = df_pairs["配当係数"].notna() & (df_pairs["配当係数"] > 1.30)
+
+            # 最終候補対象：
+            # H=0（未回収）は反発点が読めないため除外。
+            # 回収率180%以上、的中率偏差値・配当偏差値が過熱ライン以上、または実回収率が想定回収率を上回りすぎた場合は過熱として原則除外。
+            # その上で、買い目を「安定枠／中庸枠／歪み枠」に分けて選ぶ。
+            df_pairs["_has_hit"] = df_pairs["的中H"].fillna(0).astype(float) > 0
+            df_pairs["_roi_overheat"] = df_pairs["回収率%"].notna() & (df_pairs["回収率%"].astype(float) >= 180.0)
+            df_pairs["_roi_follow_over"] = df_pairs["回収差"].notna() & (df_pairs["回収差"].astype(float) > float(ROI_DIFF_LIMIT))
+            df_pairs["_not_overheated"] = ~df_pairs["_overhit"] & ~df_pairs["_roi_overheat"] & ~df_pairs["_pay_dev_overheat"] & ~df_pairs["_roi_follow_over"]
+            df_pairs["_coef_core"] = df_pairs["配当係数"].notna() & (df_pairs["配当係数"].astype(float) >= 0.50) & (df_pairs["配当係数"].astype(float) <= 1.20)
+            df_pairs["_coef_too_low"] = df_pairs["配当係数"].notna() & (df_pairs["配当係数"].astype(float) < 0.50)
+
+            # 安定枠：1-2のような低配当・安定ペアを土台にする。
+            # ペア基準比では多少高くても、絶対配当が安く、偏差値・回収率が過熱していなければ候補に残す。
+            df_pairs["_stable_lowpay_12"] = (
+                (df_pairs["ペアキー"] == "1-2")
+                & df_pairs["_has_hit"]
+                & df_pairs["偏差値"].notna()
+                & (df_pairs["偏差値"].astype(float) >= 45.0)
+                & (df_pairs["偏差値"].astype(float) <= 55.0)
+                & df_pairs["回収率%"].notna()
+                & (df_pairs["回収率%"].astype(float) >= 70.0)
+                & (df_pairs["回収率%"].astype(float) <= 130.0)
+                & df_pairs["平均配当"].notna()
+                & (df_pairs["平均配当"].astype(float) >= 300.0)
+                & (df_pairs["平均配当"].astype(float) <= 700.0)
+            )
+
+            # 中庸枠：主力株枠。候補が2点以上あるなら歪み枠より優先する。
+            # 条件は「過熱なし・的中実績あり・配当係数が基準付近・偏差値が中庸〜やや高め・回収率が暴れていない」。
+            df_pairs["_middle_core"] = (
+                candidate_mask
+                & df_pairs["_has_hit"]
+                & df_pairs["_not_overheated"]
+                & df_pairs["配当係数"].notna()
+                & (df_pairs["配当係数"].astype(float) >= 0.80)
+                & (df_pairs["配当係数"].astype(float) <= 1.30)
+                & df_pairs["偏差値"].notna()
+                & (df_pairs["偏差値"].astype(float) >= 45.0)
+                & (df_pairs["偏差値"].astype(float) <= 58.0)
+                & df_pairs["回収率%"].notna()
+                & (df_pairs["回収率%"].astype(float) >= 60.0)
+                & (df_pairs["回収率%"].astype(float) <= 160.0)
+            )
+
+            # 歪み枠：評価番号では固定しない。条件だけで選ぶ。
+            # 配当係数が低く、下振れ〜中庸で、未回収でも過熱でもないペア。
+            df_pairs["_distortion_core"] = (
+                candidate_mask
+                & df_pairs["_has_hit"]
+                & df_pairs["_not_overheated"]
+                & df_pairs["配当係数"].notna()
+                & (df_pairs["配当係数"].astype(float) >= 0.50)
+                & (df_pairs["配当係数"].astype(float) < 0.80)
+                & df_pairs["偏差値"].notna()
+                & (df_pairs["偏差値"].astype(float) >= 40.0)
+                & (df_pairs["偏差値"].astype(float) <= 58.0)
+            )
+
+            final_candidate_mask = candidate_mask & df_pairs["_has_hit"] & df_pairs["_not_overheated"]
+            if PAY_RETURN_ONLY:
+                final_candidate_mask = final_candidate_mask & (
+                    df_pairs["_stable_lowpay_12"] | df_pairs["_middle_core"] | df_pairs["_distortion_core"]
+                )
+
+            df_pairs["資産枠"] = ""
+            df_pairs.loc[df_pairs["_stable_lowpay_12"], "資産枠"] = "安定"
+            df_pairs.loc[df_pairs["_middle_core"], "資産枠"] = "中庸"
+            df_pairs.loc[df_pairs["_distortion_core"], "資産枠"] = "歪み"
+
+            df_pairs.loc[df_pairs["_pay_low"], "配当戻り余地"] = "あり"
+            df_pairs.loc[df_pairs["_pay_near"], "配当戻り余地"] = "中庸"
+            df_pairs.loc[df_pairs["_pay_high"], "配当戻り余地"] = "上振れ警戒"
+            df_pairs.loc[df_pairs["_stable_lowpay_12"], "配当戻り余地"] = "低配当安定"
+
+            df_pairs.loc[~df_pairs["_has_hit"], "総合候補理由"] = "未回収除外"
+            df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_roi_overheat"], "総合候補理由"] = "回収率過熱除外"
+            df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_roi_follow_over"] & ~df_pairs["_roi_overheat"], "総合候補理由"] = "後追い除外"
+            df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_overhit"] & ~df_pairs["_roi_overheat"] & ~df_pairs["_roi_follow_over"], "総合候補理由"] = "的中率過熱除外"
+            df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_pay_dev_overheat"] & ~df_pairs["_roi_overheat"] & ~df_pairs["_overhit"] & ~df_pairs["_roi_follow_over"], "総合候補理由"] = "配当過熱除外"
+            df_pairs.loc[df_pairs["_stable_lowpay_12"], "総合候補理由"] = "安定枠"
+            df_pairs.loc[df_pairs["_middle_core"], "総合候補理由"] = "中庸枠"
+            df_pairs.loc[df_pairs["_distortion_core"], "総合候補理由"] = "歪み枠"
+
+            # 枠別の優先順位。
+            # 本線は2点固定：安定枠＋中庸枠を柱にする。
+            # 歪み枠は本線には入れず、注として監視表示する。
+            df_pairs["_枠内順位"] = 999.0
+            df_pairs.loc[df_pairs["_stable_lowpay_12"], "_枠内順位"] = (
+                (df_pairs["偏差値"].astype(float) - 50.0).abs()
+                + (df_pairs["回収率%"].astype(float) - 100.0).abs() / 20.0
+            )
+            df_pairs.loc[df_pairs["_middle_core"], "_枠内順位"] = (
+                (df_pairs["偏差値"].astype(float) - 52.0).abs()
+                + (df_pairs["配当係数"].astype(float) - 1.0).abs() * 10.0
+                + (df_pairs["回収率%"].astype(float) - 100.0).abs() / 35.0
+            )
+            df_pairs.loc[df_pairs["_distortion_core"], "_枠内順位"] = (
+                (df_pairs["配当係数"].astype(float) - 0.70).abs() * 10.0
+                + (df_pairs["偏差値"].astype(float) - 50.0).abs() / 2.0
+                + (df_pairs["回収率%"].astype(float) - 100.0).abs() / 50.0
+            )
+
+            def _pick_unique(source_df: pd.DataFrame, limit: int, already: set) -> list:
+                if limit <= 0 or source_df.empty:
+                    return []
+                picked = []
+                for idx, r in source_df.sort_values(["_枠内順位", "配当係数", "偏差値", "回収率%", "軸番号", "相手"]).iterrows():
+                    key = str(r.get("ペアキー"))
+                    if key in already:
+                        continue
+                    picked.append(idx)
+                    already.add(key)
+                    if len(picked) >= limit:
+                        break
+                return picked
+
+            selected_idx = []
+            note_idx = []
+            used_pairs = set()
+            target_n = int(FINAL_POINT_N)
+
+            stable_df = df_pairs.loc[final_candidate_mask & df_pairs["_stable_lowpay_12"]]
+            middle_df = df_pairs.loc[final_candidate_mask & df_pairs["_middle_core"]]
+            distortion_df = df_pairs.loc[final_candidate_mask & df_pairs["_distortion_core"]]
+
+            # 本線：まず安定枠を最大1点。
+            selected_idx += _pick_unique(stable_df, 1, used_pairs)
+
+            # 本線：残りは中庸枠を優先。歪み枠は本線には入れない。
+            selected_idx += _pick_unique(middle_df, target_n - len(selected_idx), used_pairs)
+
+            # それでも2点に届かない場合のみ、歪み以外の未過熱・実績あり候補で補完。
+            # ここでも歪み枠は注へ回す。
+            if len(selected_idx) < target_n:
+                fallback_df = df_pairs.loc[
+                    final_candidate_mask
+                    & ~df_pairs.index.isin(selected_idx)
+                    & ~df_pairs["_distortion_core"]
+                ].copy()
+                fallback_df["_枠内順位"] = fallback_df["_枠内順位"].fillna(999.0)
+                selected_idx += _pick_unique(fallback_df, target_n - len(selected_idx), used_pairs)
+
+            # 注：歪み枠は予算増時の追加候補として表示。複数可。
+            note_used_pairs = set(used_pairs)
+            note_idx += _pick_unique(distortion_df, int(NOTE_MAX_N), note_used_pairs)
+
+            if not selected_idx and PAY_RETURN_ONLY:
+                st.warning("未回収除外＋配当戻り優先では本線候補がありません。必要ならチェックを外して広め候補を確認してください。")
+
+            df_pairs.loc[selected_idx, "判定"] = "本線"
+            df_pairs.loc[note_idx, "判定"] = "注"
+
+            recommended_pairs = []
+            for idx in selected_idx:
+                pair_key = str(df_pairs.loc[idx, "ペアキー"])
+                recommended_pairs.append(pair_key)
+            recommended_pairs = sorted(recommended_pairs, key=lambda x: tuple(int(v) for v in x.split("-")))
+            recommended_text = " / ".join(recommended_pairs)
+
+            note_pairs = []
+            for idx in note_idx:
+                pair_key = str(df_pairs.loc[idx, "ペアキー"])
+                note_pairs.append(pair_key)
+            note_pairs = sorted(note_pairs, key=lambda x: tuple(int(v) for v in x.split("-")))
+            note_text = " / ".join(note_pairs)
+
+            if recommended_text:
+                st.success(f"現在の推奨2車複本線：{recommended_text}")
+            if note_text:
+                st.info(f"注：{note_text}")
+
+            drop_cols = [
+                "_expected_ok", "_below_base", "_overhit", "_pay_dev_overheat", "_cold",
+                "_pay_low", "_pay_near", "_pay_high", "_has_hit", "_roi_overheat", "_roi_follow_over", "_coef_core", "_coef_too_low", "_not_overheated",
+                "_stable_lowpay_12", "_middle_core", "_distortion_core", "_枠内順位",
+            ]
+            df_pairs = df_pairs.drop(columns=[c for c in drop_cols if c in df_pairs.columns])
+
+            drop_cols = [
+                "_expected_ok", "_below_base", "_overhit", "_pay_dev_overheat", "_cold",
+                "_pay_low", "_pay_near", "_pay_high", "_has_hit", "_roi_overheat", "_roi_follow_over", "_coef_core", "_coef_too_low", "_not_overheated", "_候補優先",
+            ]
+            df_pairs = df_pairs.drop(columns=[c for c in drop_cols if c in df_pairs.columns])
+        else:
+            st.info("候補対象となる相手がありません。想定ペア的%が最低ライン以下の組み合わせは除外しています。")
+    else:
+        st.info("候補を出すには、個別2車複データが必要です。")
+
+    preferred_pair_cols = [
+        "判定",
+        "型",
+        "対象N",
+        "的中H",
+        "的中率%",
+        "想定ペア的%",
+        "想定差",
+        "平均差",
+        "中央値差",
+        "偏差値",
+        "基準位置",
+        "状態",
+        "平均配当",
+        "ペア基準配当",
+        "想定回収率%",
+        "回収率%",
+        "回収差",
+        "配当係数",
+        "配当差",
+        "配当偏差値",
+        "配当位置",
+        "配当戻り余地",
+        "資産枠",
+        "総合候補理由",
+    ]
+    df_pairs = df_pairs[[c for c in preferred_pair_cols if c in df_pairs.columns]]
+    render_sortable_table(df_pairs, height=470)
+
+    st.markdown("### 個別2車複 引継ぎ用累積表")
+    st.caption("次回の『個別2車複 引継ぎ入力』へ転記する表です。対象N・払戻合計SUM・的中Hだけ入力すれば、KSUMは自動で対象Nと同じになります。")
+
+    carry_rows = []
+    for a, b in NISHAFUKU_PAIRS:
+        label = nishafuku_label(a, b)
+        rec = payout_nishafuku_total.get(label, new_payout_rec())
+        row = payout_row(label, rec)
+        carry_rows.append({
+            "型": label,
+            "対象N": row.get("対象N"),
+            "払戻合計SUM": row.get("払戻合計SUM"),
+            "的中H": row.get("的中H"),
+            "的中率%": row.get("的中率%"),
+            "平均配当": row.get("平均配当"),
+            "ペア基準配当": PAIR_BASE_AVG_PAY_DEFAULTS.get(f"{a}-{b}"),
+            "想定ペア的%": PAIR_BASE_HIT_RATE_DEFAULTS.get(f"{a}-{b}"),
+            "想定回収率%": round(float(PAIR_BASE_HIT_RATE_DEFAULTS.get(f"{a}-{b}", 0)) * float(PAIR_BASE_AVG_PAY_DEFAULTS.get(f"{a}-{b}", 0)) / 100.0, 1),
+            "回収率%": row.get("回収率%"),
+            "回収差": round(float(row.get("回収率%")) - (float(PAIR_BASE_HIT_RATE_DEFAULTS.get(f"{a}-{b}", 0)) * float(PAIR_BASE_AVG_PAY_DEFAULTS.get(f"{a}-{b}", 0)) / 100.0), 1) if row.get("回収率%") is not None else None,
+        })
+    st.dataframe(pd.DataFrame(carry_rows), use_container_width=True, hide_index=True, height=430)
+
+    st.markdown("### 買い目確認")
+    st.write("今日入力の個別2車複：評価1・評価2軸に必要なペアを自動集計")
+    st.write("削除済み：標準棚/穴棚シミュレーター、波履歴、直近3回傾き")
