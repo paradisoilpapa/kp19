@@ -8,7 +8,7 @@ import streamlit as st
 
 
 st.set_page_config(page_title="ヴェロビ 3連複フォーメーション復習", layout="wide")
-st.title("ヴェロビ 3連複フォーメーション復習｜v12.0r")
+st.title("ヴェロビ 3連複フォーメーション復習｜v12.1r")
 st.caption(
     "3連複フォーメーション・確定着順・3連複配当だけを入力し、"
     "A～Eの着内率とフォーメーション別成績を累積集計します。"
@@ -112,10 +112,21 @@ def derive_roles(columns: List[List[str]]) -> Tuple[Dict[str, str], str]:
 
 
 def role_formation(columns: List[List[str]], roles: Dict[str, str]) -> str:
+    """
+    3連複は各列内の並び順を区別しない。
+    実車番を役割へ変換したあと、各列をA→B→C→D→E順へ正規化し、
+    同じ買い目構成を必ず同じ集計キーにまとめる。
+    """
     car_to_role = {car: role for role, car in roles.items()}
+    role_order = {role: index for index, role in enumerate(ROLES)}
     converted: List[str] = []
     for column in columns:
-        converted.append("".join(car_to_role.get(car, f"車{car}") for car in column))
+        column_roles = [car_to_role.get(car, f"車{car}") for car in column]
+        column_roles = sorted(
+            set(column_roles),
+            key=lambda role: (role_order.get(role, len(ROLES)), role),
+        )
+        converted.append("".join(column_roles))
     return "-".join(converted)
 
 
