@@ -169,7 +169,7 @@ manual_roles: Dict[str, Dict[str, int]] = {role: blank_role_record() for role in
 
 
 with tabs[0]:
-    st.subheader("日次入力（最大36R）")
+    st.subheader("日次入力（最大100R）")
     st.caption(
         "例：フォーメーション『72-721-72514』、着順『754』、3連複配当『2810』。"
         "配当は100円当たりの確定払戻額を入力してください。"
@@ -183,7 +183,7 @@ with tabs[0]:
         header[3].markdown("**3連複配当**")
 
         inputs = []
-        for index in range(1, 37):
+        for index in range(1, 101):
             c1, c2, c3, c4 = st.columns([0.7, 3.0, 1.3, 1.4])
             race = c1.text_input("R", value=str(index), key=f"race_{index}", label_visibility="collapsed")
             formation = c2.text_input(
