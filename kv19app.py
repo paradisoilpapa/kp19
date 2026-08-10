@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 
-from collections import defaultdict
 from typing import Dict, List, Tuple
 
 import pandas as pd
@@ -8,14 +7,23 @@ import streamlit as st
 
 
 st.set_page_config(page_title="ヴェロビ 3連複フォーメーション復習", layout="wide")
-st.title("ヴェロビ 3連複フォーメーション復習｜v12.1r")
+st.title("ヴェロビ 3連複フォーメーション比較｜v12.2r")
 st.caption(
     "3連複フォーメーション・確定着順・3連複配当だけを入力し、"
-    "A～Eの着内率とフォーメーション別成績を累積集計します。"
+    "全レースに全候補フォーメーションを当てて、最善の型を比較します。"
 )
 
 ROLES = ("A", "B", "C", "D", "E")
 UNIT_YEN = 100
+
+# 比較対象。全候補を全入力レースで仮想購入する。
+FORMATION_PATTERNS: Dict[str, Tuple[Tuple[str, ...], Tuple[str, ...], Tuple[str, ...]]] = {
+    "AB-ABC-ABCDE（現行）": (("A", "B"), ("A", "B", "C"), ("A", "B", "C", "D", "E")),
+    "DE-CDE-ABCDE ＝ CD-CDE-ABCDE（同一7点）": (("D", "E"), ("C", "D", "E"), ("A", "B", "C", "D", "E")),
+    "DE-ADE-ABCDE": (("D", "E"), ("A", "D", "E"), ("A", "B", "C", "D", "E")),
+    "CD-BCD-ABCDE": (("C", "D"), ("B", "C", "D"), ("A", "B", "C", "D", "E")),
+    "CD-ACD-ABCDE": (("C", "D"), ("A", "C", "D"), ("A", "B", "C", "D", "E")),
+}
 
 
 def normalize_digits(value: str) -> str:
@@ -111,27 +119,23 @@ def derive_roles(columns: List[List[str]]) -> Tuple[Dict[str, str], str]:
     return roles, ""
 
 
-def role_formation(columns: List[List[str]], roles: Dict[str, str]) -> str:
-    """
-    3連複は各列内の並び順を区別しない。
-    実車番を役割へ変換したあと、各列をA→B→C→D→E順へ正規化し、
-    同じ買い目構成を必ず同じ集計キーにまとめる。
-    """
-    car_to_role = {car: role for role, car in roles.items()}
-    role_order = {role: index for index, role in enumerate(ROLES)}
-    converted: List[str] = []
-    for column in columns:
-        column_roles = [car_to_role.get(car, f"車{car}") for car in column]
-        column_roles = sorted(
-            set(column_roles),
-            key=lambda role: (role_order.get(role, len(ROLES)), role),
-        )
-        converted.append("".join(column_roles))
-    return "-".join(converted)
-
-
 def ticket_text(ticket: Tuple[str, str, str]) -> str:
     return "-".join(ticket)
+
+
+def pattern_tickets(
+    pattern: Tuple[Tuple[str, ...], Tuple[str, ...], Tuple[str, ...]],
+    roles: Dict[str, str],
+) -> List[Tuple[str, str, str]]:
+    """役割フォーメーションを実車番の重複なし3連複買い目へ展開する。"""
+    tickets = set()
+    for first_role in pattern[0]:
+        for second_role in pattern[1]:
+            for third_role in pattern[2]:
+                cars = (roles[first_role], roles[second_role], roles[third_role])
+                if len(set(cars)) == 3:
+                    tickets.add(tuple(sorted(cars, key=int)))
+    return sorted(tickets, key=lambda ticket: tuple(int(car) for car in ticket))
 
 
 def blank_performance() -> Dict[str, int]:
@@ -175,7 +179,9 @@ def performance_row(label: str, record: Dict[str, int]) -> Dict:
 tabs = st.tabs(["日次入力", "前日までの累積", "集計結果"])
 
 daily_rows: List[Dict] = []
-manual_performance = blank_performance()
+manual_candidate_performance: Dict[str, Dict[str, int]] = {
+    label: blank_performance() for label in FORMATION_PATTERNS
+}
 manual_roles: Dict[str, Dict[str, int]] = {role: blank_role_record() for role in ROLES}
 
 
@@ -246,8 +252,6 @@ with tabs[0]:
                 continue
 
             finish_ticket = tuple(sorted(finish, key=int))
-            hit = finish_ticket in tickets
-            returned = item["payout"] if hit else 0
             role_by_car = {car: role for role, car in roles.items()}
             finish_roles = [role_by_car.get(car, "対象外") for car in finish]
 
@@ -255,21 +259,15 @@ with tabs[0]:
                 {
                     "R": item["race"],
                     "フォーメーション": normalize_digits(item["formation"]),
-                    "役割型": role_formation(columns, roles),
                     "A": roles["A"], "B": roles["B"], "C": roles["C"],
                     "D": roles["D"], "E": roles["E"],
                     "確定着順": "-".join(finish),
                     "着順役割": "-".join(finish_roles),
-                    "買い目数": len(tickets),
-                    "買い目": " / ".join(ticket_text(ticket) for ticket in tickets),
-                    "的中": "○" if hit else "×",
-                    "投資額": len(tickets) * UNIT_YEN,
-                    "払戻額": returned,
-                    "収支": returned - len(tickets) * UNIT_YEN,
-                    "_hit": hit,
-                    "_payout": returned,
+                    "確定配当": int(item["payout"]),
                     "_roles": roles,
                     "_finish": finish,
+                    "_finish_ticket": finish_ticket,
+                    "_race_payout": int(item["payout"]),
                 }
             )
 
@@ -279,12 +277,21 @@ with tabs[1]:
     st.caption("前回の集計結果を転記すると、今日入力分と合算します。")
 
     with st.form("previous_form"):
-        st.markdown("### 3連複フォーメーション成績")
-        pcols = st.columns(4)
-        prev_n = pcols[0].number_input("対象レースN", min_value=0, value=0)
-        prev_ksum = pcols[1].number_input("総点数", min_value=0, value=0)
-        prev_sum = pcols[2].number_input("払戻合計", min_value=0, value=0, step=10)
-        prev_h = pcols[3].number_input("的中H", min_value=0, value=0)
+        st.markdown("### 候補フォーメーション別成績")
+        st.caption("次回引継ぎ用表のN・総点数・払戻合計・的中Hを候補ごとに転記します。")
+        phead = st.columns([2.3, 0.8, 0.9, 1.1, 0.8])
+        for col, label in zip(phead, ("候補", "N", "総点数", "払戻合計", "的中H")):
+            col.markdown(f"**{label}**")
+
+        candidate_inputs = []
+        for candidate_index, label in enumerate(FORMATION_PATTERNS, start=1):
+            pcols = st.columns([2.3, 0.8, 0.9, 1.1, 0.8])
+            pcols[0].write(label)
+            n = pcols[1].number_input("N", min_value=0, value=0, key=f"prev_candidate_{candidate_index}_N", label_visibility="collapsed")
+            ksum = pcols[2].number_input("総点数", min_value=0, value=0, key=f"prev_candidate_{candidate_index}_KSUM", label_visibility="collapsed")
+            payout_sum = pcols[3].number_input("払戻合計", min_value=0, value=0, step=10, key=f"prev_candidate_{candidate_index}_SUM", label_visibility="collapsed")
+            hits = pcols[4].number_input("的中H", min_value=0, value=0, key=f"prev_candidate_{candidate_index}_H", label_visibility="collapsed")
+            candidate_inputs.append((label, int(n), int(ksum), int(payout_sum), int(hits)))
 
         st.markdown("### A～E着順回数")
         head = st.columns([1.0, 1.0, 1.0, 1.0, 1.0])
@@ -303,37 +310,55 @@ with tabs[1]:
 
         previous_submitted = st.form_submit_button("前日までの累積を反映")
 
-    has_previous_values = any([prev_n, prev_ksum, prev_sum, prev_h]) or any(
+    has_previous_values = any(
+        any([n, ksum, payout_sum, hits])
+        for _, n, ksum, payout_sum, hits in candidate_inputs
+    ) or any(
         any([n, c1, c2, c3]) for _, n, c1, c2, c3 in role_inputs
     )
     if previous_submitted or has_previous_values:
-        manual_performance = {
-            "N": int(prev_n), "KSUM": int(prev_ksum), "H": int(prev_h), "SUM": int(prev_sum)
-        }
+        for label, n, ksum, payout_sum, hits in candidate_inputs:
+            manual_candidate_performance[label] = {
+                "N": n, "KSUM": ksum, "H": hits, "SUM": payout_sum
+            }
         for role, n, c1, c2, c3 in role_inputs:
             manual_roles[role] = {"N": n, "C1": c1, "C2": c2, "C3": c3}
 
 
-daily_performance = blank_performance()
 daily_role_records: Dict[str, Dict[str, int]] = {role: blank_role_record() for role in ROLES}
-by_formation: Dict[str, Dict[str, int]] = defaultdict(blank_performance)
+daily_candidate_performance: Dict[str, Dict[str, int]] = {
+    label: blank_performance() for label in FORMATION_PATTERNS
+}
+candidate_race_results: List[Dict] = []
 
 for row in daily_rows:
-    daily_performance["N"] += 1
-    daily_performance["KSUM"] += int(row["買い目数"])
-    if row["_hit"]:
-        daily_performance["H"] += 1
-        daily_performance["SUM"] += int(row["_payout"])
-
-    form_record = by_formation[row["役割型"]]
-    form_record["N"] += 1
-    form_record["KSUM"] += int(row["買い目数"])
-    if row["_hit"]:
-        form_record["H"] += 1
-        form_record["SUM"] += int(row["_payout"])
-
     finish = row["_finish"]
     roles = row["_roles"]
+
+    # 全候補を全レースで必ず仮想購入する。外れもN・投資点数へ含める。
+    for label, pattern in FORMATION_PATTERNS.items():
+        tickets = pattern_tickets(pattern, roles)
+        hit = row["_finish_ticket"] in tickets
+        returned = int(row["_race_payout"]) if hit else 0
+
+        record = daily_candidate_performance[label]
+        record["N"] += 1
+        record["KSUM"] += len(tickets)
+        if hit:
+            record["H"] += 1
+            record["SUM"] += returned
+
+        candidate_race_results.append({
+            "R": row["R"],
+            "候補": label,
+            "買い目数": len(tickets),
+            "買い目": " / ".join(ticket_text(ticket) for ticket in tickets),
+            "的中": "○" if hit else "×",
+            "投資額": len(tickets) * UNIT_YEN,
+            "払戻額": returned,
+            "収支": returned - len(tickets) * UNIT_YEN,
+        })
+
     for role in ROLES:
         record = daily_role_records[role]
         record["N"] += 1
@@ -345,9 +370,12 @@ for row in daily_rows:
         elif car == finish[2]:
             record["C3"] += 1
 
-total_performance = blank_performance()
-add_performance(total_performance, manual_performance)
-add_performance(total_performance, daily_performance)
+total_candidate_performance: Dict[str, Dict[str, int]] = {
+    label: blank_performance() for label in FORMATION_PATTERNS
+}
+for label in FORMATION_PATTERNS:
+    add_performance(total_candidate_performance[label], manual_candidate_performance[label])
+    add_performance(total_candidate_performance[label], daily_candidate_performance[label])
 
 total_role_records: Dict[str, Dict[str, int]] = {role: blank_role_record() for role in ROLES}
 for role in ROLES:
@@ -356,14 +384,26 @@ for role in ROLES:
 
 
 with tabs[2]:
-    st.subheader("3連複フォーメーション成績")
-    summary = pd.DataFrame(
-        [
-            performance_row("今日入力", daily_performance),
-            performance_row("全体累積", total_performance),
-        ]
-    )
-    st.dataframe(summary, use_container_width=True, hide_index=True)
+    st.subheader("全候補フォーメーション比較｜全レース集計")
+    comparison_rows = [
+        performance_row(label, total_candidate_performance[label])
+        for label in FORMATION_PATTERNS
+    ]
+    comparison_df = pd.DataFrame(comparison_rows).sort_values(
+        by=["回収率%", "収支", "的中率%"],
+        ascending=[False, False, False],
+        na_position="last",
+    ).reset_index(drop=True)
+
+    if not comparison_df.empty and int(comparison_df.iloc[0]["対象レースN"] or 0) > 0:
+        best = comparison_df.iloc[0]
+        st.success(
+            f"現時点の最善フォーメーション：{best['区分']}｜"
+            f"回収率 {best['回収率%']}%｜収支 {int(best['収支']):,}円｜"
+            f"的中率 {best['的中率%']}%"
+        )
+    st.dataframe(comparison_df, use_container_width=True, hide_index=True)
+    st.caption("すべての候補について、外れを含む全入力レースを対象N・投資額に含めています。")
 
     st.markdown("### A～E 着内率")
     role_rows = []
@@ -388,22 +428,11 @@ with tabs[2]:
         )
     st.dataframe(pd.DataFrame(role_rows), use_container_width=True, hide_index=True)
 
-    st.markdown("### フォーメーション型別成績（今日入力）")
-    if by_formation:
-        formation_rows = [performance_row(label, record) for label, record in by_formation.items()]
-        formation_df = pd.DataFrame(formation_rows).sort_values(
-            by=["回収率%", "払戻合計"], ascending=[False, False], na_position="last"
-        )
-        st.dataframe(formation_df, use_container_width=True, hide_index=True)
-    else:
-        st.info("本日の入力はありません。")
-
-    st.markdown("### レース別明細")
+    st.markdown("### 入力レース明細")
     if daily_rows:
         visible_keys = [
-            "R", "フォーメーション", "役割型", "A", "B", "C", "D", "E",
-            "確定着順", "着順役割", "買い目数", "買い目", "的中",
-            "投資額", "払戻額", "収支",
+            "R", "フォーメーション", "A", "B", "C", "D", "E",
+            "確定着順", "着順役割", "確定配当",
         ]
         details = pd.DataFrame([{key: row[key] for key in visible_keys} for row in daily_rows])
         st.dataframe(
@@ -412,7 +441,13 @@ with tabs[2]:
             hide_index=True,
             height=max(120, 38 * (len(details) + 1)),
         )
-        missing_payout = [str(row["R"]) for row in daily_rows if row["_hit"] and row["_payout"] <= 0]
+        races_hit_by_any = {
+            str(result["R"]) for result in candidate_race_results if result["的中"] == "○"
+        }
+        missing_payout = [
+            str(row["R"]) for row in daily_rows
+            if str(row["R"]) in races_hit_by_any and int(row["_race_payout"]) <= 0
+        ]
         if missing_payout:
             st.warning("的中していますが配当が未入力です：R" + "、R".join(missing_payout))
     else:
@@ -421,7 +456,7 @@ with tabs[2]:
     st.divider()
     st.markdown("### 次回引継ぎ用")
     st.caption("次回は、この数値を『前日までの累積』へ転記してください。")
-    st.dataframe(pd.DataFrame([performance_row("全体累積", total_performance)]), use_container_width=True, hide_index=True)
+    st.dataframe(comparison_df, use_container_width=True, hide_index=True)
     carry_roles = pd.DataFrame(
         [
             {
