@@ -9,7 +9,7 @@ import streamlit as st
 
 
 st.set_page_config(page_title="ヴェロビ 3連複フォーメーション集計", layout="wide")
-st.title("ヴェロビ 3連複フォーメーション集計｜v13.0r")
+st.title("ヴェロビ 3連複フォーメーション集計｜v13.1r")
 st.caption(
     "実フォーメーション、A～F、確定着順、3連複配当、消去候補を入力し、"
     "全体・10倍以上・10倍未満で比較します。"
@@ -94,7 +94,7 @@ def parse_delete_tickets(value: str) -> Tuple[List[Tuple[str, str, str]], str]:
             continue
         cars = raw.replace("-", "")
         if not cars.isdigit() or len(cars) != 3 or any(car not in "123456789" for car in cars):
-            return [], "消去候補は『1-2-4,1-4-5』の形で入力してください。"
+            return [], "消去候補は『124,145』の形で入力してください。"
         if len(set(cars)) != 3:
             return [], "消去候補の各買い目は異なる3車にしてください。"
         tickets.add(tuple(sorted(cars, key=int)))
@@ -229,7 +229,7 @@ races: List[Dict] = []
 
 with tabs[0]:
     st.caption(
-        "消去候補は『1-2-4,1-4-5』のようにカンマ区切りで入力します。"
+        "消去候補は『124,145』のように3桁をカンマ区切りで入力します。"
         "配当0円の行はゾーン判定できないため集計対象外です。"
     )
     with st.form("race_input_form"):
@@ -248,7 +248,7 @@ with tabs[0]:
                 role_values[role] = cols[role_index].text_input(role, key=f"role_{role}_{index}", label_visibility="collapsed")
             finish = cols[8].text_input("着順", key=f"finish_{index}", placeholder="523", label_visibility="collapsed")
             payout = cols[9].number_input("配当", min_value=0, value=0, step=10, key=f"payout_{index}", label_visibility="collapsed")
-            delete_text = cols[10].text_input("消去", key=f"delete_{index}", placeholder="1-2-4,1-4-5", label_visibility="collapsed")
+            delete_text = cols[10].text_input("消去", key=f"delete_{index}", placeholder="124,145", label_visibility="collapsed")
             raw_rows.append({
                 "R": str(index), "formation": formation, "roles": role_values,
                 "finish": finish, "payout": int(payout), "delete": delete_text,
@@ -355,7 +355,7 @@ with tabs[2]:
                 "配当": race["payout"],
                 "配当ゾーン": "10倍以上" if race["payout"] >= 1000 else "10倍未満",
                 "実フォメ的中": "○" if actual_hit else "×",
-                "消去候補": " / ".join(ticket_text(ticket) for ticket in race["delete_tickets"]),
+                "消去候補": ",".join("".join(ticket) for ticket in race["delete_tickets"]),
                 "消去候補的中": "○" if delete_hit else "×",
             })
         st.dataframe(
