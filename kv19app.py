@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from collections import Counter, defaultdict
+import json
 from statistics import median
 from typing import Dict, List, Tuple
 
@@ -9,7 +10,7 @@ import streamlit as st
 
 
 st.set_page_config(page_title="ヴェロビ 3連複フォーメーション集計", layout="wide")
-st.title("ヴェロビ 3連複フォーメーション集計｜v13.2r")
+st.title("ヴェロビ 3連複フォーメーション集計｜v13.3r")
 st.caption(
     "実フォーメーション、A～F、確定着順、3連複配当、消去候補を入力し、"
     "全体・10倍以上・10倍未満で比較します。"
@@ -21,7 +22,7 @@ BASE_ROLES = ("A", "B", "C", "D", "E")
 
 # 全レースで同時検証する候補。3連複として同じ7点になる型は統合。
 FORMATION_PATTERNS: Dict[str, Tuple[Tuple[str, ...], Tuple[str, ...], Tuple[str, ...]]] = {
-    "AB-ABC-ABCDE（現行）": (("A", "B"), ("A", "B", "C"), BASE_ROLES),
+    "AE-AEF-ABCDE（現行）": (("A", "E"), ("A", "E", "F"), BASE_ROLES),
     "DE-CDE-ABCDE＝CD-CDE-ABCDE": (("D", "E"), ("C", "D", "E"), BASE_ROLES),
     "DE-ADE-ABCDE": (("D", "E"), ("A", "D", "E"), BASE_ROLES),
     "CD-BCD-ABCDE": (("C", "D"), ("B", "C", "D"), BASE_ROLES),
@@ -230,7 +231,46 @@ def delete_row(races: List[Dict]) -> Dict:
     }
 
 
-tabs = st.tabs(["入力（最大100R）", "集計結果", "入力明細"])
+def race_to_payload(race: Dict) -> Dict:
+    return {
+        "formation": race["formation"],
+        "roles": race["roles"],
+        "finish": "".join(race["finish"]),
+        "payout": int(race["payout"]),
+        "delete": " ".join("".join(ticket) for ticket in race["delete_tickets"]),
+    }
+
+
+def payload_to_race(payload: Dict, race_label: str) -> Tuple[Dict, str]:
+    if not isinstance(payload, dict):
+        return {}, "レースデータの形式が不正です。"
+    actual_tickets, formation_error = parse_formation(str(payload.get("formation", "")))
+    raw_roles = payload.get("roles", {})
+    roles, role_error = parse_roles(raw_roles if isinstance(raw_roles, dict) else {})
+    finish, finish_error = parse_finish(str(payload.get("finish", "")))
+    delete_tickets, delete_error = parse_delete_tickets(str(payload.get("delete", "")))
+    try:
+        payout = int(payload.get("payout", 0))
+    except Exception:
+        payout = 0
+    errors = [error for error in (formation_error, role_error, finish_error, delete_error) if error]
+    if payout <= 0:
+        errors.append("3連複配当が不正です。")
+    if errors:
+        return {}, f"{race_label}：" + " ".join(errors)
+    return {
+        "R": race_label,
+        "formation": normalize(str(payload.get("formation", ""))),
+        "actual_tickets": actual_tickets,
+        "roles": roles,
+        "finish": finish,
+        "finish_ticket": tuple(sorted(finish, key=int)),
+        "payout": payout,
+        "delete_tickets": delete_tickets,
+    }, ""
+
+
+tabs = st.tabs(["入力（最大100R）", "引継ぎ入力", "集計結果", "入力明細"])
 races: List[Dict] = []
 
 with tabs[0]:
@@ -291,12 +331,65 @@ with tabs[0]:
         })
 
 
+carry_races: List[Dict] = []
 with tabs[1]:
-    if not races:
+    st.subheader("前回までの引継ぎ入力")
+    st.caption(
+        "前回の『次回引継ぎ用データ』を全文貼り付けてください。"
+        "A～F着順・配当ゾーン・全候補フォーメーション・消去候補を、元レース単位で正確に引き継ぎます。"
+    )
+    carry_text = st.text_area(
+        "引継ぎデータ",
+        value="",
+        height=220,
+        placeholder='{"version":"v13.3r","races":[...]}',
+    )
+    if carry_text.strip():
+        try:
+            loaded = json.loads(carry_text)
+            payloads = loaded.get("races", []) if isinstance(loaded, dict) else loaded
+            if not isinstance(payloads, list):
+                raise ValueError("racesが配列ではありません。")
+            carry_errors = []
+            for index, payload in enumerate(payloads, start=1):
+                race, error = payload_to_race(payload, f"引継{index}")
+                if error:
+                    carry_errors.append(error)
+                else:
+                    carry_races.append(race)
+            if carry_errors:
+                for error in carry_errors[:20]:
+                    st.warning(error)
+            st.success(f"前回までの{len(carry_races)}レースを読み込みました。")
+        except Exception as exc:
+            st.error(f"引継ぎデータを読み込めません：{exc}")
+
+    all_races_for_export = carry_races + races
+    export_data = {
+        "version": "v13.3r",
+        "races": [race_to_payload(race) for race in all_races_for_export],
+    }
+    export_text = json.dumps(export_data, ensure_ascii=False, separators=(",", ":"))
+    st.markdown("### 次回引継ぎ用データ")
+    st.caption("下の内容をコピーして、次回このタブへ貼り付けてください。")
+    st.code(export_text, language="json")
+    st.download_button(
+        "引継ぎデータをダウンロード",
+        data=export_text,
+        file_name="velobi_carryover_v13_3r.json",
+        mime="application/json",
+    )
+
+
+all_races = carry_races + races
+
+
+with tabs[2]:
+    if not all_races:
         st.info("有効な入力レースがありません。")
     else:
         for zone_name, zone_filter in ZONES.items():
-            zone_races = [race for race in races if zone_filter(race["payout"])]
+            zone_races = [race for race in all_races if zone_filter(race["payout"])]
             st.header(zone_name)
             st.caption(f"対象レース：{len(zone_races)}件")
 
@@ -344,12 +437,12 @@ with tabs[1]:
             st.divider()
 
 
-with tabs[2]:
-    if not races:
+with tabs[3]:
+    if not all_races:
         st.info("有効な入力レースがありません。")
     else:
         detail_rows = []
-        for race in races:
+        for race in all_races:
             actual_hit = race["finish_ticket"] in race["actual_tickets"]
             delete_hit = race["finish_ticket"] in race["delete_tickets"]
             detail_rows.append({
